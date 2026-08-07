@@ -1,26 +1,266 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #09090b;
+  --neutral-secondary-medium: #ffffff;
+  --default-medium: #e4e4e7;
+  --heading: #09090b;
+  --body: #71717a;
+  --border-color: #e4e4e7;
+
+  --brand: #18181b;
+  --brand-strong: #09090b;
+  --brand-medium: #27272a;
+  --brand-soft: rgba(24, 24, 27, 0.05);
+  --fg-brand: #ffffff;
 }
 
-@theme inline {
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --neutral-secondary-medium: #18181b;
+  --default-medium: #27272a;
+  --heading: #fafafa;
+  --body: #a1a1aa;
+  --border-color: #27272a;
+
+  --brand: #fafafa;
+  --brand-strong: #ffffff;
+  --brand-medium: #e4e4e7;
+  --brand-soft: rgba(250, 250, 250, 0.1);
+  --fg-brand: #18181b;
+}
+
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --font-sans: var(--font-poppins);
+  --font-mono: monospace;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-neutral-secondary-medium: var(--neutral-secondary-medium);
+  --color-default-medium: var(--default-medium);
+  --color-heading: var(--heading);
+  --color-body: var(--body);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-medium: var(--brand-medium);
+  --color-brand-soft: var(--brand-soft);
+  --color-fg-brand: var(--fg-brand);
+  --radius-base: 0.5rem;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-poppins), sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Force pointer cursor on all interactive elements */
+button,
+a,
+select,
+option,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+[role="button"],
+.cursor-pointer {
+  cursor: pointer !important;
+}
+
+/* Dark mode manual class selector overrides */
+.dark body {
+  background-color: #0b0f19;
+  color: #f1f5f9;
+}
+
+/* Override hardcoded light backgrounds in tables, cards, sections, lists */
+.dark .bg-white {
+  background-color: var(--neutral-secondary-medium) !important;
+}
+.dark .bg-slate-50,
+.dark .bg-slate-50\/50,
+.dark .bg-zinc-50,
+.dark .bg-zinc-50\/50,
+.dark .bg-slate-50\/20,
+.dark .bg-zinc-50\/20 {
+  background-color: var(--background) !important;
+}
+.dark .bg-slate-100,
+.dark .bg-zinc-100 {
+  background-color: var(--default-medium) !important;
+}
+.dark .bg-slate-100\/70,
+.dark .bg-zinc-100\/70 {
+  background-color: rgba(39, 39, 42, 0.7) !important;
+}
+.dark .bg-slate-50\/60,
+.dark .bg-zinc-50\/60 {
+  background-color: rgba(9, 9, 11, 0.6) !important;
+}
+.dark .bg-blue-50,
+.dark .bg-indigo-50 {
+  background-color: rgba(250, 250, 250, 0.05) !important;
+}
+
+/* Text overrides in dark mode */
+.dark .text-slate-950,
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-zinc-950,
+.dark .text-zinc-900,
+.dark .text-zinc-800,
+.dark .text-heading {
+  color: var(--foreground) !important;
+}
+.dark .text-slate-700,
+.dark .text-zinc-700 {
+  color: var(--foreground) !important;
+}
+.dark .text-slate-600,
+.dark .text-slate-650,
+.dark .text-zinc-600,
+.dark .text-zinc-650,
+.dark .text-body {
+  color: var(--body) !important;
+}
+.dark .text-slate-500,
+.dark .text-slate-450,
+.dark .text-zinc-500,
+.dark .text-zinc-450 {
+  color: var(--body) !important;
+}
+.dark .text-slate-400,
+.dark .text-zinc-400 {
+  color: var(--body) !important;
+}
+.dark .text-blue-600,
+.dark .text-blue-500,
+.dark .text-indigo-600,
+.dark .text-indigo-500 {
+  color: var(--foreground) !important;
+}
+
+/* Borders and dividers in dark mode */
+.dark .border-slate-200,
+.dark .border-slate-150,
+.dark .border-slate-100,
+.dark .border-slate-200\/80,
+.dark .border-slate-200\/85,
+.dark .border-zinc-200,
+.dark .border-zinc-150,
+.dark .border-zinc-100,
+.dark .border-zinc-200\/80,
+.dark .border-zinc-200\/85,
+.dark .border-blue-100,
+.dark .border-indigo-100 {
+  border-color: var(--border-color) !important;
+}
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-zinc-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-color) !important;
+}
+
+/* Modals & Overlays */
+.dark .bg-slate-900\/80,
+.dark .bg-zinc-950\/40 {
+  background-color: rgba(9, 9, 11, 0.8) !important;
+}
+
+/* Gradient banner overrides in dark mode */
+.dark .bg-gradient-to-r.from-slate-900 {
+  background: var(--neutral-secondary-medium) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Button & interactive states overrides */
+.dark .bg-blue-600,
+.dark .bg-brand {
+  background-color: var(--brand) !important;
+  color: var(--fg-brand) !important;
+}
+.dark .bg-blue-600:hover,
+.dark .bg-brand:hover {
+  background-color: var(--brand-medium) !important;
+}
+.dark .hover\:bg-blue-700:hover {
+  background-color: var(--brand-medium) !important;
+}
+
+/* Checkbox & inputs styles in dark mode */
+.dark input[type="checkbox"] {
+  border-color: var(--border-color) !important;
+  background-color: var(--background) !important;
+}
+.dark input[type="checkbox"]:checked {
+  background-color: var(--brand) !important;
+  border-color: var(--brand) !important;
+}
+.dark select,
+.dark option {
+  background-color: var(--neutral-secondary-medium) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Alert panels / Status items overrides */
+.dark .bg-rose-50 {
+  background-color: rgba(244, 63, 94, 0.1) !important;
+  border-color: rgba(244, 63, 94, 0.2) !important;
+}
+.dark .text-rose-700,
+.dark .text-rose-600 {
+  color: #fb7185 !important;
+}
+.dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  border-color: rgba(16, 185, 129, 0.2) !important;
+}
+.dark .text-emerald-700,
+.dark .text-emerald-600 {
+  color: #34d399 !important;
+}
+
+/* Hover effects in dark mode */
+.dark .hover\:bg-slate-50\/50:hover,
+.dark .hover\:bg-zinc-50\/50:hover {
+  background-color: rgba(39, 39, 42, 0.3) !important;
+}
+.dark .hover\:bg-slate-50\/40:hover,
+.dark .hover\:bg-zinc-50\/40:hover {
+  background-color: rgba(39, 39, 42, 0.3) !important;
+}
+.dark .hover\:bg-slate-50\/20:hover,
+.dark .hover\:bg-zinc-50\/20:hover {
+  background-color: rgba(39, 39, 42, 0.2) !important;
+}
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-zinc-50:hover {
+  background-color: var(--background) !important;
+}
+.dark .hover\:bg-slate-100\/80:hover,
+.dark .hover\:bg-zinc-100\/80:hover {
+  background-color: rgba(39, 39, 42, 0.8) !important;
+}
+
+/* View Transitions configuration for circle reveal */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 9999;
+}
+::view-transition-group(root) {
+  animation-duration: 0s;
 }

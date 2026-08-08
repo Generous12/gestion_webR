@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import FormularioEquipo from './FormularioEquipo';
 import { EquipoMiembro, Rol } from '@/types/database.types';
 import { eliminarMiembro, validarPasswordUsuario, actualizarPasswordUsuario } from '@/app/actions/equipo';
@@ -24,9 +25,15 @@ interface EquipoLayoutProps {
   initialMembers: MiembroConRol[];
   roles: Rol[];
   isAdmin: boolean;
+  cajasAbiertas?: {
+    id_caja: number;
+    id_usuario: number | null;
+    monto_inicial: number;
+    fecha_apertura: string;
+  }[];
 }
 
-export default function EquipoLayout({ initialMembers, roles, isAdmin }: EquipoLayoutProps) {
+export default function EquipoLayout({ initialMembers, roles, isAdmin, cajasAbiertas = [] }: EquipoLayoutProps) {
   const members = initialMembers;
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -197,6 +204,29 @@ export default function EquipoLayout({ initialMembers, roles, isAdmin }: EquipoL
         </div>
       </div>
 
+      {/* Alerta de Cajas Abiertas por el Equipo */}
+      {cajasAbiertas.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">💰</span>
+            <div>
+              <p className="text-xs font-bold text-emerald-900">
+                Hay {cajasAbiertas.length} turno(s) de caja ABIERTO(S) actualmente en el sistema
+              </p>
+              <p className="text-[11px] text-emerald-700 mt-0.5">
+                Los cobros y ventas del gimnasio se están registrando en tiempo real en los turnos activos de los colaboradores.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/admin/caja"
+            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition-all shadow-xs shrink-0"
+          >
+            Ir al Arqueo de Caja →
+          </Link>
+        </div>
+      )}
+
       {/* Main Container Card */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
         {/* Filters Header */}
@@ -265,6 +295,7 @@ export default function EquipoLayout({ initialMembers, roles, isAdmin }: EquipoL
                     const initials = `${person.nombre.charAt(0)}${person.apellido?.charAt(0) || ''}`.toUpperCase();
                     const rolNombre = person.equipo_roles?.[0]?.roles?.nombre || '—';
                     const hasUser = !!person.usuarios_sistema;
+                    const cajaTurno = cajasAbiertas.find(c => c.id_usuario === person.usuarios_sistema?.id_usuario);
                     return (
                       <tr key={person.id_miembro} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="whitespace-nowrap py-4 pl-6 pr-3">
@@ -273,7 +304,19 @@ export default function EquipoLayout({ initialMembers, roles, isAdmin }: EquipoL
                               {initials}
                             </div>
                             <div className="ml-4">
-                              <div className="font-semibold text-sm text-slate-800">{person.nombre} {person.apellido || ''}</div>
+                              <div className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                                <span>{person.nombre} {person.apellido || ''}</span>
+                                {cajaTurno && (
+                                  <Link
+                                    href="/admin/caja"
+                                    title="Caja abierta actualmente en el sistema"
+                                    className="inline-flex items-center gap-1 text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold px-2 py-0.5 rounded-full hover:bg-emerald-200 transition-colors shadow-2xs"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    Caja Abierta (S/ {Number(cajaTurno.monto_inicial || 0).toFixed(2)})
+                                  </Link>
+                                )}
+                              </div>
                               <div className="text-xs text-slate-500">{person.email || 'Sin correo registrado'}</div>
                               {hasUser && (
                                 <div className="mt-1 flex items-center gap-1.5">

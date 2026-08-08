@@ -1,6 +1,7 @@
 import React from 'react';
 import { getSesionActual } from '@/app/actions/auth';
 import { redirect } from 'next/navigation';
+import { obtenerCajaActiva } from '@/app/actions/caja';
 import AdminLayoutClient, { AdminLayoutClientProps } from './components/AdminLayoutClient';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -11,8 +12,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     redirect('/login');
   }
 
+  const cajaActiva = await obtenerCajaActiva();
+
   return (
-    <AdminLayoutClient user={user as unknown as AdminLayoutClientProps['user']}>
+    <AdminLayoutClient user={user as unknown as AdminLayoutClientProps['user']} cajaActiva={cajaActiva}>
       {children}
     </AdminLayoutClient>
   );

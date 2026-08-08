@@ -11,50 +11,77 @@ interface RolesLayoutProps {
 }
 
 export default function RolesLayout({ roles, permisos, rolesPermisos }: RolesLayoutProps) {
-  const [selectedRolId, setSelectedRolId] = useState<number | null>(null);
+  // Default to selecting the first non-system or first role
+  const [selectedRolId, setSelectedRolId] = useState<number | null>(() => roles[0]?.id_rol ?? null);
 
   const selectedRol = roles.find(r => r.id_rol === selectedRolId);
 
   return (
-    <div>
-      <div className="sm:flex sm:items-center sm:justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Roles y Permisos</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Administra los roles del sistema y configura sus permisos de acceso a los módulos.
-          </p>
+    <div className="space-y-6">
+      {/* Header Panel */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
+        <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-blue-600/10 blur-3xl"></div>
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Roles y Permisos (RBAC)</h1>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+              Control de privilegios y módulos de acceso asignados a cada puesto del gimnasio.
+            </p>
+          </div>
         </div>
       </div>
 
-
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Columna de Roles */}
         <div className="lg:col-span-1">
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50">
-              <h2 className="text-sm font-semibold text-slate-900">Roles Existentes</h2>
+          <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/60 dark:bg-zinc-850/40 flex justify-between items-center">
+              <h2 className="text-xs font-bold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
+                Roles de Colaboradores
+              </h2>
+              <span className="text-[10px] font-bold text-zinc-400">
+                {roles.length} roles
+              </span>
             </div>
-            <ul className="divide-y divide-slate-100">
-              {roles.map(rol => (
-                <li
-                  key={rol.id_rol}
-                  className={`p-4 cursor-pointer hover:bg-blue-50/50 transition-colors ${selectedRolId === rol.id_rol ? 'bg-blue-50 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
-                  onClick={() => setSelectedRolId(rol.id_rol)}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="font-medium text-slate-900 flex items-center gap-2">
-                        {rol.nombre}
-                        {rol.es_sistema && (
-                          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">Sistema</span>
-                        )}
-                      </span>
-                      <p className="text-xs text-slate-500 mt-1">{rol.descripcion}</p>
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-850">
+              {roles.map(rol => {
+                const countPermisos = rolesPermisos.filter(rp => rp.id_rol === rol.id_rol).length;
+                const isSelected = selectedRolId === rol.id_rol;
+
+                return (
+                  <li
+                    key={rol.id_rol}
+                    className={`p-4 cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-blue-50/80 dark:bg-blue-950/30 border-l-4 border-blue-600'
+                        : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/50 border-l-4 border-transparent'
+                    }`}
+                    onClick={() => setSelectedRolId(rol.id_rol)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold text-xs ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-900 dark:text-zinc-100'}`}>
+                            {rol.nombre}
+                          </span>
+                          {rol.es_sistema ? (
+                            <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 px-2 py-0.5 text-[9px] font-bold">
+                              Sistema
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 px-2 py-0.5 text-[9px] font-semibold">
+                              {countPermisos} módulos
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed line-clamp-2">
+                          {rol.descripcion || 'Sin descripción detallada.'}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
@@ -70,12 +97,16 @@ export default function RolesLayout({ roles, permisos, rolesPermisos }: RolesLay
               rolesPermisos={rolesPermisos}
             />
           ) : (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm h-full min-h-[300px] flex flex-col items-center justify-center p-12 text-center">
-              <svg className="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-              <h3 className="mt-2 text-sm font-semibold text-slate-900">Selecciona un Rol</h3>
-              <p className="mt-1 text-sm text-slate-500">Haz clic en un rol de la lista izquierda para configurar sus permisos.</p>
+            <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-xs h-full min-h-[300px] flex flex-col items-center justify-center p-12 text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 flex items-center justify-center">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+              </div>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Selecciona un Rol</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
+                Haz clic en un rol de la lista izquierda para visualizar y configurar sus permisos agrupados.
+              </p>
             </div>
           )}
         </div>

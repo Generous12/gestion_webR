@@ -59,6 +59,13 @@ export default function CajaClient({
   // La caja a mostrar: si el admin eligió una específica de cajasAbiertas, o cajaActiva, o la primera abierta
   const cajaAMostrar = (esAdmin && selectedCajaId ? cajasAbiertas.find((c) => c.id_caja === selectedCajaId) : null) || cajaActiva || (esAdmin && cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
 
+  // Verificar si existe alguna caja abierta actualmente en el sistema
+  const hayCajaAbierta = Boolean(
+    cajaActiva || 
+    (cajasAbiertas && cajasAbiertas.length > 0) || 
+    (historialCajas && historialCajas.some((c) => c.estado === 'ABIERTA'))
+  );
+
   // Datos del responsable de la caja activa
   const esMiCaja = cajaAMostrar ? cajaAMostrar.id_usuario === currentUser?.id_usuario : false;
   const puedeCerrarCaja = esAdmin || esMiCaja;
@@ -348,55 +355,76 @@ export default function CajaClient({
                 </div>
               )}
 
-              {/* Formulario de Apertura */}
-              <div className="max-w-md mx-auto">
-                <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
-                  <div className="bg-zinc-900 p-6 text-center text-white border-b border-zinc-800">
-                    <h2 className="text-xl font-black tracking-tight">Apertura de Caja Diaria</h2>
-                    <p className="text-xs text-zinc-400 mt-1">
-                      Inicia tu turno de caja para registrar cobros de membresías y ventas de cafetería.
+              {/* Formulario de Apertura o Aviso de Caja Ocupada */}
+              {!esAdmin && cajasAbiertas.length > 0 ? (
+                <div className="max-w-md mx-auto">
+                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-2xl p-6 text-center shadow-md">
+                    <span className="text-3xl block mb-2">🔒</span>
+                    <h3 className="font-bold text-amber-900 dark:text-amber-200 text-sm">
+                      Caja Ocupada por Otro Colaborador
+                    </h3>
+                    <p className="text-xs text-amber-800/80 dark:text-amber-400/80 mt-2 leading-relaxed">
+                      Ya existe un turno de caja activo en el gimnasio a cargo de{' '}
+                      <strong>
+                        {cajasAbiertas[0]?.usuarios_sistema?.equipo?.nombre
+                          ? `${cajasAbiertas[0].usuarios_sistema.equipo.nombre} ${cajasAbiertas[0].usuarios_sistema.equipo.apellido || ''}`
+                          : `@${cajasAbiertas[0]?.usuarios_sistema?.usuario || 'Colaborador'}`}
+                      </strong>.
+                      <br className="my-1" />
+                      Para evitar descuadres en el cajón de efectivo, solo puede haber 1 caja activa a la vez. Debe liquidarse el turno anterior antes de abrir uno nuevo.
                     </p>
                   </div>
-
-                  <form onSubmit={handleAbrirCaja} className="p-6 space-y-5">
-                    {formError && (
-                      <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
-                        {formError}
-                      </div>
-                    )}
-
-                    <div className="space-y-2 text-center">
-                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
-                        ¿Con cuánto dinero en sencillo abres hoy?
-                      </label>
-                      <div className="relative max-w-xs mx-auto">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 font-extrabold text-lg">
-                          S/
-                        </span>
-                        <input
-                          type="number"
-                          step="0.10"
-                          min="0"
-                          required
-                          value={montoInicial}
-                          onChange={(e) => setMontoInicial(e.target.value)}
-                          className="w-full text-center bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-2xl py-3 pl-8 pr-4 font-black text-lg text-zinc-850 dark:text-zinc-50 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="pt-2">
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 py-3.5 rounded-2xl text-xs font-black tracking-wider transition-all cursor-pointer shadow-md"
-                      >
-                        {loading ? 'Abriendo Turno...' : 'ABRIR TURNO DE CAJA'}
-                      </button>
-                    </div>
-                  </form>
                 </div>
-              </div>
+              ) : (
+                <div className="max-w-md mx-auto">
+                  <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
+                    <div className="bg-zinc-900 p-6 text-center text-white border-b border-zinc-800">
+                      <h2 className="text-xl font-black tracking-tight">Apertura de Caja Diaria</h2>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        Inicia tu turno de caja para registrar cobros de membresías y ventas de cafetería.
+                      </p>
+                    </div>
+
+                    <form onSubmit={handleAbrirCaja} className="p-6 space-y-5">
+                      {formError && (
+                        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                          {formError}
+                        </div>
+                      )}
+
+                      <div className="space-y-2 text-center">
+                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
+                          ¿Con cuánto dinero en sencillo abres hoy?
+                        </label>
+                        <div className="relative max-w-xs mx-auto">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 font-extrabold text-lg">
+                            S/
+                          </span>
+                          <input
+                            type="number"
+                            step="0.10"
+                            min="0"
+                            required
+                            value={montoInicial}
+                            onChange={(e) => setMontoInicial(e.target.value)}
+                            className="w-full text-center bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-2xl py-3 pl-8 pr-4 font-black text-lg text-zinc-850 dark:text-zinc-50 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-2">
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="w-full bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 py-3.5 rounded-2xl text-xs font-black tracking-wider transition-all cursor-pointer shadow-md"
+                        >
+                          {loading ? 'Abriendo Turno...' : 'ABRIR TURNO DE CAJA'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             /* Vista de Caja Abierta */
@@ -746,7 +774,8 @@ export default function CajaClient({
                           ) : (
                             <div className="flex items-center justify-end gap-2">
                               <span className="text-[11px] text-zinc-400 font-medium">Liquidado</span>
-                              {c.fecha === new Date().toISOString().split('T')[0] && (esAdmin || c.id_usuario === currentUser?.id_usuario) && (
+                              {/* Si ya existe una caja abierta en el sistema, NO se muestra el botón de Reabrir */}
+                              {!hayCajaAbierta && c.fecha === new Date().toISOString().split('T')[0] && (esAdmin || c.id_usuario === currentUser?.id_usuario) && (
                                 <button
                                   onClick={() => handleReabrir(c.id_caja)}
                                   disabled={loading}

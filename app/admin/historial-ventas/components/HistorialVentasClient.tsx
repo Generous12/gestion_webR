@@ -132,7 +132,7 @@ export default function HistorialVentasClient({
   const totalEfectivo = ventas.filter((v) => v.metodoPago.toLowerCase().includes('efectivo')).reduce((sum, v) => sum + v.total, 0);
   const totalYape = ventas.filter((v) => v.metodoPago.toLowerCase().includes('yape')).reduce((sum, v) => sum + v.total, 0);
   const totalPlin = ventas.filter((v) => v.metodoPago.toLowerCase().includes('plin')).reduce((sum, v) => sum + v.total, 0);
-  const totalStripe = ventas.filter((v) => v.metodoPago.toLowerCase().includes('stripe')).reduce((sum, v) => sum + v.total, 0);
+  const totalOtros = ventas.filter((v) => !['efectivo', 'yape', 'plin'].includes(v.metodoPago.toLowerCase())).reduce((sum, v) => sum + v.total, 0);
   const ventasPendientesFoto = ventas.filter((v) => ['yape', 'plin'].includes(v.metodoPago.toLowerCase()) && !v.comprobanteUrl).length;
 
   return (
@@ -267,10 +267,10 @@ export default function HistorialVentasClient({
           </div>
           <div className="bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 p-3.5 rounded-xl">
             <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">
-              Stripe
+              Tarjeta / Transf.
             </span>
             <span className="text-sm font-black text-indigo-950 dark:text-indigo-100 mt-1 block">
-              S/ {totalStripe.toFixed(2)}
+              S/ {totalOtros.toFixed(2)}
             </span>
           </div>
           <div className="bg-zinc-50 dark:bg-zinc-850/60 border border-zinc-150 dark:border-zinc-850 p-3.5 rounded-xl">

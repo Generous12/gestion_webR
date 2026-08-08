@@ -24,21 +24,25 @@ export default async function VentasPage({ searchParams }: PageProps) {
   }
 
   const supabase = await createClient();
+  const params = await searchParams;
+  const preSelectedClientId = params.cliente ? parseInt(params.cliente as string) : null;
 
-  // 1. Obtener caja activa
-  const cajaActiva = await obtenerCajaActiva();
+  // Ejecutar todas las consultas en paralelo simultáneamente (Promise.all)
+  const [cajaActiva, planes, { data: rawMetodos }, productos, preSelectedClientRes] = await Promise.all([
+    obtenerCajaActiva(),
+    obtenerTiposMembresia(),
+    supabase
+      .from('metodos_pago')
+      .select('*')
+      .eq('estado', 'ACTIVO')
+      .order('id_metodo', { ascending: true }),
+    obtenerProductos(),
+    preSelectedClientId && !isNaN(preSelectedClientId)
+      ? supabase.from('clientes').select('*').eq('id_cliente', preSelectedClientId).maybeSingle()
+      : Promise.resolve({ data: null })
+  ]);
 
-  // 2. Obtener planes de membresías
-  const planes = await obtenerTiposMembresia();
-
-  // 3. Obtener métodos de pago activos y asegurar únicamente: Efectivo, Yape, Plin y Stripe
-  const { data: rawMetodos } = await supabase
-    .from('metodos_pago')
-    .select('*')
-    .eq('estado', 'ACTIVO')
-    .order('id_metodo', { ascending: true });
-
-  const allowedNames = ['Efectivo', 'Yape', 'Plin', 'Stripe'];
+  const allowedNames = ['Efectivo', 'Yape', 'Plin', 'Tarjeta', 'Transferencia'];
   const metodosPago = (rawMetodos || []).filter(m => 
     allowedNames.some(name => name.toLowerCase() === m.nombre.toLowerCase())
   );
@@ -53,22 +57,7 @@ export default async function VentasPage({ searchParams }: PageProps) {
     }
   });
 
-  // 4. Si viene un id_cliente por parámetro de la URL
-  const params = await searchParams;
-  const preSelectedClientId = params.cliente ? parseInt(params.cliente as string) : null;
-  let preSelectedClient = null;
-
-  if (preSelectedClientId && !isNaN(preSelectedClientId)) {
-    const { data: client } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('id_cliente', preSelectedClientId)
-      .single();
-    preSelectedClient = client;
-  }
-
-  // 5. Obtener catálogo de productos
-  const productos = await obtenerProductos();
+  const preSelectedClient = preSelectedClientRes?.data || null;
 
   return (
     <VentasClient

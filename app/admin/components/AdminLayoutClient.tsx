@@ -41,7 +41,18 @@ interface NavCategory {
 
 export default function AdminLayoutClient({ children, user, cajaActiva }: AdminLayoutClientProps) {
   const pathname = usePathname();
+  const [prevPathname, setPrevPathname] = useState<string>(pathname);
+  const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
+  const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Sincronizar estado cuando cambia la ruta sin renderizados en cascada (recomendado por React)
+  if (prevPathname !== pathname) {
+    setPrevPathname(pathname);
+    setOptimisticPath(null);
+    setIsNavigating(false);
+  }
+
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
@@ -291,17 +302,12 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
     }
   ];
 
-  // Helper para validar permisos de acceso a cada ítem del menú
-  const tieneAccesoModulo = (modulo: string, href: string) => {
+  // Helper para validar permisos de acceso a cada ítem del menú según RBAC estricto
+  const tieneAccesoModulo = (modulo: string, _href: string) => {
     if (user.usuario === 'admin') return true;
-    if (href === '/admin/historial-ventas') {
-      const esAdmin = user.usuario === 'admin' || user.roles?.includes('Admin') || user.roles?.includes('Administrador');
-      const esCaja = user.modulos?.includes('Caja') || user.roles?.includes('Cajero') || user.roles?.includes('Caja');
-      const esRecepcion = user.modulos?.includes('Recepcion') || user.modulos?.includes('Recepción') || user.roles?.includes('Recepcionista') || user.roles?.includes('Recepcion');
-      const tieneModulo = user.modulos?.includes('HistorialVentas') || user.modulos?.includes('Ventas');
-      return esAdmin || esCaja || esRecepcion || tieneModulo;
-    }
-    return user.modulos?.includes(modulo) ?? false;
+    const esAdmin = user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+    if (esAdmin) return true;
+    return user.modulos?.includes(modulo) || user.permisos?.includes(modulo) || false;
   };
 
   const userInitials = user.equipo
@@ -345,11 +351,19 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
                     </div>
                     <div className="space-y-0.5">
                       {filteredItems.map((item) => {
-                        const isActive = pathname === item.href || (item.href !== '/admin' && pathname?.startsWith(`${item.href}`));
+                        const currentPath = (isNavigating && optimisticPath) ? optimisticPath : pathname;
+                        const isActive = currentPath === item.href || (item.href !== '/admin' && currentPath?.startsWith(`${item.href}`));
                         return (
                           <Link
                             key={item.name}
                             href={item.href}
+                            prefetch={true}
+                            onClick={() => {
+                              if (pathname !== item.href) {
+                                setOptimisticPath(item.href);
+                                setIsNavigating(true);
+                              }
+                            }}
                             className={`group flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-xl transition-all ${isActive
                               ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/25 dark:bg-blue-600 dark:text-white'
                               : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100/80 dark:hover:bg-zinc-900/80 hover:text-zinc-950 dark:hover:text-white'
@@ -404,6 +418,13 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
 
         {/* Main Content Area */}
         <div className="flex flex-1 flex-col md:pl-68 h-screen">
+          {/* Barra de progreso de carga superior instantánea */}
+          {isNavigating && (
+            <div className="fixed top-0 left-0 right-0 h-1 z-[100] overflow-hidden bg-blue-100/40 dark:bg-blue-950/40">
+              <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 animate-pulse w-full shadow-[0_0_12px_rgba(59,130,246,0.9)]" />
+            </div>
+          )}
+
           {/* Header - Mobile & Desktop */}
           <header className="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b border-zinc-200/60 bg-white/90 backdrop-blur-md dark:bg-zinc-950/90 dark:border-zinc-900 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
@@ -425,6 +446,12 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
                 <span className="text-zinc-800 dark:text-zinc-200 font-semibold capitalize">
                   {pathname === '/admin' ? 'Dashboard General' : pathname.replace('/admin/', '').replace('-', ' ')}
                 </span>
+                {isNavigating && (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-blue-500 font-bold bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-full animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                    Cargando...
+                  </span>
+                )}
               </div>
             </div>
 
@@ -433,6 +460,7 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
               {cajaActiva ? (
                 <Link
                   href="/admin/caja"
+                  prefetch={true}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold transition-all hover:bg-emerald-100 dark:hover:bg-emerald-900/60 shadow-2xs"
                   title="Caja activa. Haz clic para ver arqueo y movimientos."
                 >
@@ -442,6 +470,7 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
               ) : (
                 <Link
                   href="/admin/caja"
+                  prefetch={true}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-700 dark:text-amber-300 text-xs font-bold transition-all hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-2xs"
                   title="Caja no iniciada. Haz clic para abrir turno."
                 >
@@ -486,7 +515,7 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
               <div className="fixed inset-0 flex flex-row">
                 <div className="relative flex w-full max-w-xs flex-col bg-white dark:bg-zinc-950 pt-5 pb-4 border-r border-zinc-200 dark:border-zinc-900 shadow-xl">
                   <div className="flex h-12 shrink-0 items-center justify-between px-6 border-b border-zinc-100 dark:border-zinc-900 pb-4">
-                    <Link href="/admin" className="flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Link href="/admin" prefetch={true} className="flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
                       <div className="h-7 w-7 rounded-lg bg-blue-600 flex items-center justify-center text-xs font-black text-white">G</div>
                       <span className="text-base font-bold text-zinc-900 dark:text-white">GestionWeb</span>
                     </Link>
@@ -505,12 +534,20 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
                           </h3>
                           <div className="space-y-0.5">
                             {filteredItems.map((item) => {
-                              const isActive = pathname === item.href;
+                              const currentPath = (isNavigating && optimisticPath) ? optimisticPath : pathname;
+                              const isActive = currentPath === item.href || (item.href !== '/admin' && currentPath?.startsWith(`${item.href}`));
                               return (
                                 <Link
                                   key={item.name}
                                   href={item.href}
-                                  onClick={() => setIsMobileMenuOpen(false)}
+                                  prefetch={true}
+                                  onClick={() => {
+                                    setIsMobileMenuOpen(false);
+                                    if (pathname !== item.href) {
+                                      setOptimisticPath(item.href);
+                                      setIsNavigating(true);
+                                    }
+                                  }}
                                   className={`group flex items-center justify-between px-3 py-2.5 text-xs font-semibold rounded-xl transition-all ${isActive
                                     ? 'bg-blue-600 text-white shadow-sm'
                                     : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900'

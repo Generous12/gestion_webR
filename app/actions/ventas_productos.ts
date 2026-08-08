@@ -63,41 +63,53 @@ export async function registrarVentaProductos(
     }
   }
 
-  // 3. Registrar Venta Principal
-  const basePayload: Record<string, unknown> = {
-    id_cliente: idCliente || null,
-    id_usuario: loggedInUser.id_usuario,
-    total: total,
-    estado: 'COMPLETADA'
-  };
+  // Determinar id_metodo según el nombre
+  let idMetodo = 1; // Default Efectivo
+  const metodoLower = (metodoPago || 'efectivo').toLowerCase();
+  if (metodoLower.includes('yape')) idMetodo = 2;
+  else if (metodoLower.includes('plin')) idMetodo = 3;
+  else if (metodoLower.includes('tarjeta')) idMetodo = 4;
+  else if (metodoLower.includes('transferencia')) idMetodo = 5;
 
-  let { data: venta, error: errVenta } = await supabase
+  // 3. Registrar Venta Principal
+  const { data: venta, error: errVenta } = await supabase
     .from('ventas_productos')
     .insert({
-      ...basePayload,
+      id_cliente: idCliente || null,
+      id_usuario: loggedInUser.id_usuario,
+      total: total,
+      estado: 'COMPLETADA',
       id_caja: cajaActiva.id_caja,
-      metodo_pago: metodoPago,
-      id_stripe_intent: stripeIntentId || null,
-      comprobante_url: comprobanteUrl || null
+      metodo_pago: metodoPago || 'Efectivo',
+      id_stripe_intent: stripeIntentId || null
     })
     .select()
     .single();
 
-  // Si falló por columnas que aún no existen en el schema (ej. id_caja, metodo_pago, comprobante_url)
-  if (errVenta && (errVenta.message?.includes('column') || errVenta.code === 'PGRST204')) {
-    const fallback = await supabase
-      .from('ventas_productos')
-      .insert(basePayload)
-      .select()
-      .single();
-
-    venta = fallback.data;
-    errVenta = fallback.error;
-  }
-
   if (errVenta || !venta) {
     console.error('Error al crear venta de productos:', errVenta);
-    return { error: `Error al registrar la venta: ${errVenta?.message}` };
+    return { error: `Error al registrar la venta: ${errVenta?.message || 'Fallo en base de datos'}` };
+  }
+
+  // 3.1 Registrar Cobro en tabla 'pagos' para trazabilidad financiera y adjunto de comprobantes
+  const { data: pagoRegistrado, error: errPagoReg } = await supabase
+    .from('pagos')
+    .insert({
+      id_membresia: null,
+      id_metodo: idMetodo,
+      id_usuario: loggedInUser.id_usuario,
+      concepto: `Venta Tienda Tkt #${venta.id_venta}`,
+      monto: total,
+      numero_operacion: stripeIntentId || null,
+      url_comprobante: comprobanteUrl || null,
+      estado: 'CONFIRMADO',
+      fecha_pago: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (errPagoReg) {
+    console.warn('Advertencia al registrar pago de tienda en pagos:', errPagoReg.message);
   }
 
   // 4. Registrar detalles de venta, disminuir stock y registrar movimientos de inventario
@@ -153,6 +165,7 @@ export async function registrarVentaProductos(
     .insert({
       id_caja: cajaActiva.id_caja,
       id_usuario: loggedInUser.id_usuario,
+      id_pago: pagoRegistrado?.id_pago || null,
       tipo: 'INGRESO',
       concepto: `Venta Tienda Tkt #${venta.id_venta} (${metodoPago})`,
       monto: total
@@ -171,6 +184,7 @@ export async function registrarVentaProductos(
 
   revalidatePath('/admin/caja');
   revalidatePath('/admin/ventas');
+  revalidatePath('/admin/historial-ventas');
   revalidatePath('/admin');
   
   return { success: true, id_venta: venta.id_venta };
@@ -254,10 +268,12 @@ interface PagoRow {
   concepto?: string | null;
   numero_operacion?: string | null;
   fecha?: string | null;
+  fecha_pago?: string | null;
   created_at?: string | null;
   fecha_creacion?: string | null;
   metodo?: string | null;
   comprobante_url?: string | null;
+  url_comprobante?: string | null;
   metodos_pago?: MetodoPagoJoin | MetodoPagoJoin[] | null;
   usuarios_sistema?: UsuarioJoin | UsuarioJoin[] | null;
   membresias_cliente?: MembresiaClienteJoin | MembresiaClienteJoin[] | null;
@@ -306,11 +322,17 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
       }
     };
 
+    // 0. Obtener todos los pagos para asociar comprobantes y números de operación
+    const { data: allPagos } = await supabase
+      .from('pagos')
+      .select('id_pago, concepto, url_comprobante, numero_operacion, id_metodo, metodos_pago(nombre)');
+
+    const pagosList = allPagos || [];
+
     // 1. Obtener ventas de productos (Tienda)
-    // Intentamos seleccionar campos base sin forzar comprobante_url si aún no existe la columna en Supabase
     let ventasTienda: VentaTiendaRow[] = [];
     
-    // Intento 1: Selección completa con joins
+    // Intento 1: Selección completa con joins y metodo_pago
     const { data: vtData1, error: errTienda1 } = await supabase
       .from('ventas_productos')
       .select(`
@@ -319,6 +341,7 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
         total,
         id_cliente,
         id_usuario,
+        metodo_pago,
         clientes(nombre, apellido, dni),
         usuarios_sistema(usuario),
         detalle_ventas_productos(
@@ -331,7 +354,7 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
       .order('fecha', { ascending: false });
 
     if (errTienda1) {
-      // Intento 2 (Fallback): Selección simple
+      // Fallback simple si joins fallan
       const { data: vtData2 } = await supabase
         .from('ventas_productos')
         .select('*');
@@ -373,7 +396,10 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
           });
         }
 
-        const metodo = vt.metodo_pago || 'Efectivo';
+        // Buscar comprobante y número de operación asociado en pagos
+        const pagoAsociado = pagosList.find(p => p.concepto === `Venta Tienda Tkt #${vt.id_venta}`);
+        const mpObj = Array.isArray(pagoAsociado?.metodos_pago) ? pagoAsociado?.metodos_pago[0] : pagoAsociado?.metodos_pago;
+        const metodo = vt.metodo_pago || (mpObj as { nombre?: string | null } | undefined)?.nombre || 'Efectivo';
         const requiereComprobante = ['yape', 'plin'].includes(metodo.toLowerCase());
 
         resultados.push({
@@ -385,7 +411,8 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
           clienteNombre: cli?.nombre ? `${cli.nombre} ${cli.apellido || ''}`.trim() : 'Cliente Mostrador (Anónimo)',
           clienteDni: cli?.dni || null,
           usuarioNombre: usr?.usuario || 'Cajero / Sistema',
-          comprobanteUrl: vt.comprobante_url || null,
+          numeroOperacion: pagoAsociado?.numero_operacion || null,
+          comprobanteUrl: pagoAsociado?.url_comprobante || null,
           requiereComprobante,
           detalles
         });
@@ -393,7 +420,6 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
     }
 
     // 2. Obtener cobros de membresías (Pagos)
-    // Usamos columnas existentes (monto, concepto, numero_operacion, etc.) sin forzar fecha que puede no existir
     let pagosMemb: PagoRow[] = [];
 
     const { data: pData1, error: errPagos1 } = await supabase
@@ -403,6 +429,8 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
         monto,
         concepto,
         numero_operacion,
+        url_comprobante,
+        fecha_pago,
         metodos_pago(nombre),
         usuarios_sistema(usuario),
         membresias_cliente(
@@ -411,13 +439,15 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
           clientes(nombre, apellido, dni),
           tipos_membresia(nombre)
         )
-      `);
+      `)
+      .not('id_membresia', 'is', null);
 
     if (errPagos1) {
       // Fallback simple a pagos
       const { data: pData2 } = await supabase
         .from('pagos')
-        .select('*');
+        .select('*')
+        .not('id_membresia', 'is', null);
       pagosMemb = (pData2 as unknown as PagoRow[]) || [];
     } else {
       pagosMemb = (pData1 as unknown as PagoRow[]) || [];
@@ -426,7 +456,7 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
     if (pagosMemb) {
       for (const p of pagosMemb) {
         const mc = Array.isArray(p.membresias_cliente) ? p.membresias_cliente[0] : p.membresias_cliente;
-        const fechaPago = p.fecha || p.created_at || mc?.fecha_inicio || p.fecha_creacion || new Date().toISOString();
+        const fechaPago = p.fecha_pago || p.fecha || p.created_at || mc?.fecha_inicio || p.fecha_creacion || new Date().toISOString();
 
         if (!esMismoDiaLocal(fechaPago, fechaFiltro)) {
           continue;
@@ -450,7 +480,7 @@ export async function obtenerVentasReportePorDia(fechaSeleccionada?: string): Pr
           clienteDni: cli?.dni || null,
           usuarioNombre: usr?.usuario || 'Sistema',
           numeroOperacion: p.numero_operacion || null,
-          comprobanteUrl: p.comprobante_url || null,
+          comprobanteUrl: p.url_comprobante || null,
           requiereComprobante,
           detalles: [
             {
@@ -490,19 +520,54 @@ export async function subirComprobanteVenta(
   const supabase = await createClient();
 
   if (tipoVenta === 'TIENDA') {
-    const { error } = await supabase
-      .from('ventas_productos')
-      .update({ comprobante_url: comprobanteBase64 })
-      .eq('id_venta', id);
+    // Buscar si ya existe un registro en pagos para este ticket
+    const { data: pagoExistente } = await supabase
+      .from('pagos')
+      .select('id_pago')
+      .eq('concepto', `Venta Tienda Tkt #${id}`)
+      .maybeSingle();
 
-    if (error) {
-      console.error('Error al actualizar comprobante de tienda:', error);
-      return { error: error.message };
+    if (pagoExistente) {
+      const { error } = await supabase
+        .from('pagos')
+        .update({ url_comprobante: comprobanteBase64 })
+        .eq('id_pago', pagoExistente.id_pago);
+
+      if (error) {
+        console.error('Error al actualizar comprobante de tienda:', error);
+        return { error: error.message };
+      }
+    } else {
+      // Obtener venta para crear pago con monto exacto
+      const { data: vt } = await supabase
+        .from('ventas_productos')
+        .select('total, metodo_pago')
+        .eq('id_venta', id)
+        .single();
+
+      let idMetodo = 2; // Yape
+      if (vt?.metodo_pago?.toLowerCase().includes('plin')) idMetodo = 3;
+
+      const { error } = await supabase.from('pagos').insert({
+        id_membresia: null,
+        id_metodo: idMetodo,
+        id_usuario: loggedInUser.id_usuario,
+        concepto: `Venta Tienda Tkt #${id}`,
+        monto: Number(vt?.total || 0),
+        url_comprobante: comprobanteBase64,
+        estado: 'CONFIRMADO',
+        fecha_pago: new Date().toISOString()
+      });
+
+      if (error) {
+        console.error('Error al crear pago de tienda con comprobante:', error);
+        return { error: error.message };
+      }
     }
   } else {
     const { error } = await supabase
       .from('pagos')
-      .update({ comprobante_url: comprobanteBase64 })
+      .update({ url_comprobante: comprobanteBase64 })
       .eq('id_pago', id);
 
     if (error) {
@@ -512,5 +577,7 @@ export async function subirComprobanteVenta(
   }
 
   revalidatePath('/admin/ventas');
+  revalidatePath('/admin/historial-ventas');
+  revalidatePath('/admin');
   return { success: true };
 }

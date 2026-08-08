@@ -57,6 +57,7 @@ interface VentaTiendaItemRow {
   metodo_pago?: string | null;
   fecha?: string | null;
   created_at?: string | null;
+  estado?: string | null;
 }
 
 interface MovimientoCajaRow {
@@ -100,50 +101,73 @@ export default async function AdminDashboardPage() {
   }
 
   const supabase = await createClient();
+  const hoy = new Date();
+  const hoyStr = hoy.toISOString().split('T')[0];
+  const en7Dias = new Date(hoy.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const en7DiasStr = en7Dias.toISOString().split('T')[0];
 
-  // --- 1. CLIENTES & MEMBRESÍAS ---
-  const { count: totalClientes } = await supabase
-    .from('clientes')
-    .select('*', { count: 'exact', head: true });
-
-  const { count: membresiasActivas } = await supabase
-    .from('membresias_cliente')
-    .select('*', { count: 'exact', head: true })
-    .eq('estado', 'ACTIVA');
-
-  const { count: membresiasVencidas } = await supabase
-    .from('membresias_cliente')
-    .select('*', { count: 'exact', head: true })
-    .eq('estado', 'VENCIDA');
-
-  // Membresías por vencer en los próximos 7 días
-  const hoyStr = new Date().toISOString().split('T')[0];
-  const en7DiasStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const { data: rawMembPorVencer } = await supabase
-    .from('membresias_cliente')
-    .select(`
-      id_membresia,
-      fecha_fin,
-      precio_pagado,
-      clientes(nombre, apellido, dni, telefono),
-      tipos_membresia(nombre)
-    `)
-    .eq('estado', 'ACTIVA')
-    .gte('fecha_fin', hoyStr)
-    .lte('fecha_fin', en7DiasStr)
-    .order('fecha_fin', { ascending: true })
-    .limit(5);
+  // Ejecutar todas las consultas del Dashboard en paralelo (Promise.all)
+  const [
+    { count: totalClientes },
+    { count: membresiasActivas },
+    { count: membresiasVencidas },
+    { data: rawMembPorVencer },
+    { data: rawMovimientos },
+    { data: rawVentasTienda },
+    { data: rawPagosData },
+    { data: rawGastosData },
+    { data: cajaAbierta },
+    { data: productosData }
+  ] = await Promise.all([
+    supabase.from('clientes').select('*', { count: 'exact', head: true }),
+    supabase.from('membresias_cliente').select('*', { count: 'exact', head: true }).eq('estado', 'ACTIVA'),
+    supabase.from('membresias_cliente').select('*', { count: 'exact', head: true }).eq('estado', 'VENCIDA'),
+    supabase
+      .from('membresias_cliente')
+      .select(`
+        id_membresia,
+        fecha_fin,
+        precio_pagado,
+        clientes(nombre, apellido, dni, telefono),
+        tipos_membresia(nombre)
+      `)
+      .eq('estado', 'ACTIVA')
+      .gte('fecha_fin', hoyStr)
+      .lte('fecha_fin', en7DiasStr)
+      .order('fecha_fin', { ascending: true })
+      .limit(5),
+    supabase
+      .from('movimientos_caja')
+      .select('id_movimiento, monto, tipo, concepto, fecha')
+      .order('fecha', { ascending: false }),
+    supabase
+      .from('ventas_productos')
+      .select('id_venta, total, metodo_pago, fecha, estado'),
+    supabase
+      .from('pagos')
+      .select('id_pago, monto, concepto, metodos_pago(nombre), fecha_pago, estado'),
+    supabase
+      .from('gastos')
+      .select('id_gasto, monto_estimado, monto_final, estado, concepto, fecha_programada, categorias_gasto(nombre)'),
+    supabase
+      .from('cajas')
+      .select('id_caja, monto_inicial, fecha_apertura, usuarios_sistema(usuario)')
+      .eq('estado', 'ABIERTA')
+      .order('fecha_apertura', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('productos')
+      .select('id_producto, stock, precio_compra, precio_venta, nombre, estado')
+  ]);
 
   const membPorVencer = (rawMembPorVencer as unknown as MembresiaPorVencerItem[]) || [];
-
-  // --- 2. FLUJO DE CAJA & MOVIMIENTOS ---
-  const { data: rawMovimientos } = await supabase
-    .from('movimientos_caja')
-    .select('id_movimiento, monto, tipo, concepto, fecha')
-    .order('fecha', { ascending: false });
-
   const movimientos = (rawMovimientos as MovimientoCajaRow[]) || [];
+  const ventasTienda = (rawVentasTienda as VentaTiendaItemRow[]) || [];
+  const pagosData = (rawPagosData as unknown as PagoItemRow[]) || [];
+  const gastosData = (rawGastosData as unknown as GastoRow[]) || [];
 
+  // --- 1. FLUJO DE CAJA & MOVIMIENTOS ---
   const totalIngresos = movimientos
     .filter(m => m.tipo === 'INGRESO')
     .reduce((sum, m) => sum + Number(m.monto || 0), 0);
@@ -155,31 +179,19 @@ export default async function AdminDashboardPage() {
   const balanceNeto = totalIngresos - totalEgresos;
   const margenUtilidad = totalIngresos > 0 ? (balanceNeto / totalIngresos) * 100 : 0;
 
-  // --- 3. VENTAS DE TIENDA ---
-  const { data: rawVentasTienda } = await supabase
-    .from('ventas_productos')
-    .select('id_venta, total, metodo_pago, fecha, created_at');
+  // --- 2. VENTAS DE TIENDA ---
+  const totalVentasTienda = ventasTienda
+    .filter(v => v.estado !== 'ANULADA')
+    .reduce((sum, v) => sum + Number(v.total || 0), 0);
+  const countVentasTienda = ventasTienda.filter(v => v.estado !== 'ANULADA').length;
 
-  const ventasTienda = (rawVentasTienda as VentaTiendaItemRow[]) || [];
-  const totalVentasTienda = ventasTienda.reduce((sum, v) => sum + Number(v.total || 0), 0);
-  const countVentasTienda = ventasTienda.length;
+  // --- 3. COBROS DE MEMBRESÍAS ---
+  const totalPagosMemb = pagosData
+    .filter(p => p.estado === 'CONFIRMADO' && (!p.concepto || !p.concepto.startsWith('Venta Tienda Tkt #')))
+    .reduce((sum, p) => sum + Number(p.monto || 0), 0);
+  const countPagosMemb = pagosData.filter(p => p.estado === 'CONFIRMADO' && (!p.concepto || !p.concepto.startsWith('Venta Tienda Tkt #'))).length;
 
-  // --- 4. COBROS DE MEMBRESÍAS ---
-  const { data: rawPagosData } = await supabase
-    .from('pagos')
-    .select('id_pago, monto, concepto, metodos_pago(nombre), fecha, created_at, estado');
-
-  const pagosData = (rawPagosData as unknown as PagoItemRow[]) || [];
-  const totalPagosMemb = pagosData.reduce((sum, p) => sum + Number(p.monto || 0), 0);
-  const countPagosMemb = pagosData.length;
-
-  // --- 5. GASTOS PROGRAMADOS Y POR CATEGORÍA ---
-  const { data: rawGastosData } = await supabase
-    .from('gastos')
-    .select('id_gasto, monto_estimado, monto_final, estado, concepto, fecha_programada, categorias_gasto(nombre)');
-
-  const gastosData = (rawGastosData as unknown as GastoRow[]) || [];
-
+  // --- 4. GASTOS PROGRAMADOS Y POR CATEGORÍA ---
   const gastosPendientesTotal = gastosData
     .filter(g => g.estado === 'PENDIENTE')
     .reduce((sum, g) => sum + Number(g.monto_estimado || 0), 0);
@@ -200,49 +212,43 @@ export default async function AdminDashboardPage() {
 
   const totalGastosCategorizados = Object.values(gastosPorCategoria).reduce((a, b) => a + b, 0) || 1;
 
-  // --- 6. MÉTODOS DE PAGO ACUMULADOS ---
+  // --- 5. MÉTODOS DE PAGO ACUMULADOS ---
   const pagosPorMetodo: Record<string, number> = {
     'Efectivo': 0,
     'Yape / Plin': 0,
-    'Tarjeta / Stripe': 0,
-    'Otros': 0
+    'Tarjeta': 0,
+    'Transferencia / Otros': 0
   };
 
+  // Sumar cobros de membresías (excluyendo los que provienen de tienda para evitar duplicidad)
   pagosData.forEach(p => {
+    if (p.estado === 'ANULADO') return;
+    if (p.concepto && p.concepto.startsWith('Venta Tienda Tkt #')) {
+      return; // Ya se suma en ventasTienda
+    }
     const mp = Array.isArray(p.metodos_pago) ? p.metodos_pago[0] : p.metodos_pago;
     const nombre = (mp?.nombre || 'Efectivo').toLowerCase();
     const monto = Number(p.monto || 0);
     if (nombre.includes('efectivo')) pagosPorMetodo['Efectivo'] += monto;
     else if (nombre.includes('yape') || nombre.includes('plin')) pagosPorMetodo['Yape / Plin'] += monto;
-    else if (nombre.includes('tarjeta') || nombre.includes('stripe')) pagosPorMetodo['Tarjeta / Stripe'] += monto;
-    else pagosPorMetodo['Otros'] += monto;
+    else if (nombre.includes('tarjeta') || nombre.includes('stripe')) pagosPorMetodo['Tarjeta'] += monto;
+    else pagosPorMetodo['Transferencia / Otros'] += monto;
   });
 
+  // Sumar ventas de tienda de productos
   ventasTienda.forEach(v => {
+    if (v.estado === 'ANULADA') return;
     const nombre = (v.metodo_pago || 'Efectivo').toLowerCase();
     const monto = Number(v.total || 0);
     if (nombre.includes('efectivo')) pagosPorMetodo['Efectivo'] += monto;
     else if (nombre.includes('yape') || nombre.includes('plin')) pagosPorMetodo['Yape / Plin'] += monto;
-    else if (nombre.includes('tarjeta') || nombre.includes('stripe')) pagosPorMetodo['Tarjeta / Stripe'] += monto;
-    else pagosPorMetodo['Otros'] += monto;
+    else if (nombre.includes('tarjeta') || nombre.includes('stripe')) pagosPorMetodo['Tarjeta'] += monto;
+    else pagosPorMetodo['Transferencia / Otros'] += monto;
   });
 
-  const totalMetodos = Object.values(pagosPorMetodo).reduce((a, b) => a + b, 0) || 1;
+  const totalMetodos = Object.values(pagosPorMetodo).reduce((a, b) => a + b, 0);
 
-  // --- 7. CAJA ACTIVA ---
-  const { data: cajaAbierta } = await supabase
-    .from('cajas')
-    .select('id_caja, monto_inicial, fecha_apertura, usuarios_sistema(usuario)')
-    .eq('estado', 'ABIERTA')
-    .order('fecha_apertura', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  // --- 8. INVENTARIO DE PRODUCTOS ---
-  const { data: productosData } = await supabase
-    .from('productos')
-    .select('id_producto, stock, precio_compra, precio_venta, nombre, estado');
-
+  // --- 6. INVENTARIO DE PRODUCTOS ---
   const valorizacionInventario = (productosData || []).reduce(
     (sum, p) => sum + Number(p.stock || 0) * Number(p.precio_venta || 0),
     0
@@ -516,7 +522,7 @@ export default async function AdminDashboardPage() {
                           ? 'bg-blue-500'
                           : 'bg-zinc-400'
                       }`}
-                      style={{ width: `${Math.max(porcentaje, 2)}%` }}
+                      style={{ width: `${totalMetodos > 0 && monto > 0 ? Math.max(porcentaje, 4) : 0}%` }}
                     />
                   </div>
                 </div>

@@ -20,24 +20,20 @@ export default async function FinanzasPage() {
 
   const supabase = await createClient();
 
-  // 1. Obtener caja activa para permitir pagos
-  const cajaActiva = await obtenerCajaActiva();
-
-  // 2. Obtener gastos programados y categorías
-  const gastos = await obtenerGastosProgramados();
-  const categorias = await obtenerCategoriasGasto();
-
-  // 3. Obtener distribución de cobros por método de pago
-  const { data: pagosData } = await supabase
-    .from('pagos')
-    .select('monto, metodos_pago(nombre)')
-    .eq('estado', 'CONFIRMADO');
-
-  // 4. Obtener todos los movimientos financieros históricos para el gráfico evolutivo
-  const { data: movimientosData } = await supabase
-    .from('movimientos_caja')
-    .select('monto, tipo, fecha')
-    .order('fecha', { ascending: true });
+  // Ejecutar todas las consultas en paralelo con Promise.all
+  const [cajaActiva, gastos, categorias, { data: pagosData }, { data: movimientosData }] = await Promise.all([
+    obtenerCajaActiva(),
+    obtenerGastosProgramados(),
+    obtenerCategoriasGasto(),
+    supabase
+      .from('pagos')
+      .select('monto, metodos_pago(nombre)')
+      .eq('estado', 'CONFIRMADO'),
+    supabase
+      .from('movimientos_caja')
+      .select('monto, tipo, fecha')
+      .order('fecha', { ascending: true })
+  ]);
 
   return (
     <FinanzasClient

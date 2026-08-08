@@ -12,23 +12,21 @@ export default async function RolesPage() {
 
   const supabase = await createClient();
 
-  // 1. Obtener todos los roles
-  const { data: roles } = await supabase
-    .from('roles')
-    .select('*')
-    .order('id_rol', { ascending: true });
-
-  // 2. Obtener todos los permisos posibles
-  const { data: permisos } = await supabase
-    .from('permisos')
-    .select('*')
-    .order('modulo', { ascending: true })
-    .order('id_permiso', { ascending: true });
-
-  // 3. Obtener todas las relaciones activas de roles_permisos
-  const { data: rolesPermisos } = await supabase
-    .from('roles_permisos')
-    .select('*');
+  // Obtener roles, permisos y rolesPermisos en paralelo
+  const [{ data: roles }, { data: permisos }, { data: rolesPermisos }] = await Promise.all([
+    supabase
+      .from('roles')
+      .select('*')
+      .order('id_rol', { ascending: true }),
+    supabase
+      .from('permisos')
+      .select('*')
+      .order('modulo', { ascending: true })
+      .order('id_permiso', { ascending: true }),
+    supabase
+      .from('roles_permisos')
+      .select('*')
+  ]);
 
   return (
     <RolesLayout 

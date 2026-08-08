@@ -8,6 +8,8 @@ import { useModalAlert } from '@/context/ModalAlertContext';
 
 interface RecepcionClientProps {
   planes: TipoMembresia[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cajaActiva?: any;
   user: {
     usuario: string;
     roles?: string[];
@@ -16,7 +18,7 @@ interface RecepcionClientProps {
   };
 }
 
-export default function RecepcionClient({ user }: RecepcionClientProps) {
+export default function RecepcionClient({ user, cajaActiva }: RecepcionClientProps) {
   const { showConfirm, showAlert, showToast } = useModalAlert();
   const [query, setQuery] = useState('');
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -335,15 +337,30 @@ export default function RecepcionClient({ user }: RecepcionClientProps) {
                   Editar
                 </button>
                 {puedeRenovar && (
-                  <Link
-                    href={`/admin/ventas?cliente=${selectedCliente.id_cliente}`}
-                    className="flex-1 md:flex-initial text-center bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20 px-5 py-2.5 rounded-xl text-xs font-black transition-all transform hover:-translate-y-0.5 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                    </svg>
-                    {accessState.status === 'DENEGADO' ? 'Renovar Membresía' : 'Renovar / Vender Plan'}
-                  </Link>
+                  cajaActiva ? (
+                    <Link
+                      href={`/admin/ventas?cliente=${selectedCliente.id_cliente}`}
+                      className="flex-1 md:flex-initial text-center bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20 px-5 py-2.5 rounded-xl text-xs font-black transition-all transform hover:-translate-y-0.5 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
+                      {accessState.status === 'DENEGADO' ? 'Renovar Membresía' : 'Renovar / Vender Plan'}
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => showAlert({
+                        title: 'Arqueo de Caja Requerido',
+                        message: 'La caja diaria se encuentra cerrada. Para poder registrar cobros y renovar membresías, debes abrir caja primero.',
+                        type: 'warning'
+                      })}
+                      className="flex-1 md:flex-initial text-center bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-not-allowed opacity-80 flex items-center justify-center gap-1.5 border border-zinc-200 dark:border-zinc-750"
+                      title="Caja cerrada: Abre caja para renovar"
+                    >
+                      <span className="text-amber-500">🔒</span>
+                      <span>Caja Cerrada (Abrir Caja para Renovar)</span>
+                    </button>
+                  )
                 )}
                 {esAdmin && accessState.membresia && (
                   <button
@@ -409,49 +426,77 @@ export default function RecepcionClient({ user }: RecepcionClientProps) {
 
       {/* Directory listing: shown only when no client is selected */}
       {!selectedCliente && !loadingAccess && (
-        <div className="bg-white border border-zinc-200/80 rounded-2xl shadow-xs overflow-hidden dark:bg-zinc-900 dark:border-zinc-850">
-          <div className="p-5 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 flex justify-between items-center flex-wrap gap-4">
-            <div>
-              <h2 className="text-sm font-bold text-zinc-850 dark:text-zinc-100">Directorio de Clientes</h2>
-              <p className="text-[10px] text-zinc-500 mt-0.5">Selecciona un cliente para evaluar su estado de acceso al gimnasio.</p>
+        !esAdmin && query.trim().length === 0 ? (
+          /* VISTA TERMINAL SEGURO DE RECEPCIÓN (Para personal no administrador) */
+          <div className="bg-white border border-zinc-200/80 rounded-2xl shadow-xs p-10 text-center dark:bg-zinc-900 dark:border-zinc-850 space-y-4">
+            <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 mx-auto flex items-center justify-center">
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
+              </svg>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">
-                {clientes.length} cliente(s)
+            <div>
+              <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">Terminal de Control de Acceso y Recepción</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto leading-relaxed">
+                Por seguridad y protección de datos, el directorio completo está reservado a la Administración. Escribe el <strong>DNI o Nombre</strong> en el buscador para consultar su membresía y validar su acceso.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-wrap justify-center gap-2">
+              <span className="inline-flex items-center gap-1 bg-zinc-100 dark:bg-zinc-850 text-zinc-600 dark:text-zinc-400 px-3 py-1.5 rounded-lg text-[10px] font-semibold">
+                🔒 Directorio Protegido
               </span>
-              
-              {esAdmin ? (
-                <button
-                  onClick={() => setRevealData(!revealData)}
-                  className="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200/80 text-zinc-700 dark:bg-zinc-850 dark:hover:bg-zinc-800 dark:text-zinc-200 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors border border-zinc-250 dark:border-zinc-700"
-                >
-                  {revealData ? (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                      </svg>
-                      Ocultar Datos
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      Revelar Datos
-                    </>
-                  )}
-                </button>
-              ) : (
-                <span className="inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 px-3 py-1.5 rounded-lg text-[10px] font-bold border border-zinc-200/50">
-                  <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                  Datos Enmascarados
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-3 py-1.5 rounded-lg text-[10px] font-semibold">
+                ⚡ Check-in por DNI / Código
+              </span>
             </div>
           </div>
+        ) : (
+          <div className="bg-white border border-zinc-200/80 rounded-2xl shadow-xs overflow-hidden dark:bg-zinc-900 dark:border-zinc-850">
+            <div className="p-5 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 flex justify-between items-center flex-wrap gap-4">
+              <div>
+                <h2 className="text-sm font-bold text-zinc-850 dark:text-zinc-100">
+                  {esAdmin ? 'Directorio de Clientes' : 'Resultados de Búsqueda de Socios'}
+                </h2>
+                <p className="text-[10px] text-zinc-500 mt-0.5">
+                  {esAdmin ? 'Selecciona un cliente para evaluar su estado de acceso al gimnasio.' : 'Haz clic en el socio para abrir su ficha y registrar su ingreso.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">
+                  {clientes.length} socio(s) encontrado(s)
+                </span>
+                
+                {esAdmin ? (
+                  <button
+                    onClick={() => setRevealData(!revealData)}
+                    className="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200/80 text-zinc-700 dark:bg-zinc-850 dark:hover:bg-zinc-800 dark:text-zinc-200 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors border border-zinc-250 dark:border-zinc-700"
+                  >
+                    {revealData ? (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                        Ocultar Datos
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        Revelar Datos
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-650 px-3 py-1.5 rounded-lg text-[10px] font-bold border border-zinc-200/50">
+                    <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    Datos Enmascarados
+                  </span>
+                )}
+              </div>
+            </div>
 
           {loading ? (
             <div className="p-12 text-center">
@@ -490,16 +535,31 @@ export default function RecepcionClient({ user }: RecepcionClientProps) {
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {puedeRenovar && (
-                            <Link
-                              href={`/admin/ventas?cliente=${c.id_cliente}`}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs inline-flex items-center gap-1"
-                              title="Renovar o Vender Membresía para este cliente"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                              </svg>
-                              Renovar
-                            </Link>
+                            cajaActiva ? (
+                              <Link
+                                href={`/admin/ventas?cliente=${c.id_cliente}`}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs inline-flex items-center gap-1"
+                                title="Renovar o Vender Membresía para este cliente"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                                Renovar
+                              </Link>
+                            ) : (
+                              <button
+                                onClick={() => showAlert({
+                                  title: 'Arqueo de Caja Requerido',
+                                  message: 'La caja diaria se encuentra cerrada. Debes abrir caja para poder registrar cobros y renovar membresías.',
+                                  type: 'warning'
+                                })}
+                                className="bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-zinc-400 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-not-allowed opacity-80 inline-flex items-center gap-1 border border-zinc-200 dark:border-zinc-750"
+                                title="Caja cerrada: Abre caja para renovar"
+                              >
+                                <span className="text-amber-500">🔒</span>
+                                <span>Caja Cerrada</span>
+                              </button>
+                            )
                           )}
                           <button
                             onClick={() => handleSelectCliente(c)}
@@ -520,7 +580,8 @@ export default function RecepcionClient({ user }: RecepcionClientProps) {
             </div>
           )}
         </div>
-      )}
+      )
+    )}
 
       {/* ----------------- MODAL CREAR CLIENTE ----------------- */}
       {isNewModalOpen && (

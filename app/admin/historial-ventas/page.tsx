@@ -10,13 +10,11 @@ export default async function HistorialVentasPage() {
     redirect('/login');
   }
 
-  // Validar permisos de acceso: Administrador, Caja y Recepción
-  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Admin') || user.roles?.includes('Administrador');
-  const esCaja = user.modulos?.includes('Caja') || user.roles?.includes('Cajero') || user.roles?.includes('Caja');
-  const esRecepcion = user.modulos?.includes('Recepcion') || user.modulos?.includes('Recepción') || user.roles?.includes('Recepcionista') || user.roles?.includes('Recepcion');
-  const tieneModulo = user.modulos?.includes('HistorialVentas') || user.modulos?.includes('Ventas');
+  // Validar permisos de acceso estrictos
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tienePermiso = user.modulos?.includes('HistorialVentas') || user.permisos?.includes('HistorialVentas');
 
-  if (!esAdmin && !esCaja && !esRecepcion && !tieneModulo) {
+  if (!esAdmin && !tienePermiso) {
     redirect('/admin');
   }
 

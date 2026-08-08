@@ -26,16 +26,20 @@ export default async function EquipoPage() {
     }) ?? false;
   }
 
-  // 1. Fetch de miembros con su respectivo rol y cuenta de usuario
-  const { data: miembros } = await supabase
-    .from('equipo')
-    .select('*, equipo_roles(id_rol, roles(nombre)), usuarios_sistema(id_usuario, usuario, estado)')
-    .order('fecha_creacion', { ascending: false });
-
-  // 2. Fetch de roles para pasárselos al formulario
-  const { data: roles } = await supabase
-    .from('roles')
-    .select('*');
+  // 1. Fetch en paralelo de miembros, roles y cajas activas
+  const [{ data: miembros }, { data: roles }, { data: cajasAbiertas }] = await Promise.all([
+    supabase
+      .from('equipo')
+      .select('*, equipo_roles(id_rol, roles(nombre)), usuarios_sistema(id_usuario, usuario, estado)')
+      .order('fecha_creacion', { ascending: false }),
+    supabase
+      .from('roles')
+      .select('*'),
+    supabase
+      .from('cajas')
+      .select('id_caja, id_usuario, monto_inicial, fecha_apertura')
+      .eq('estado', 'ABIERTA')
+  ]);
 
   // Filtrar para que nadie pueda ver al Administrador excepto él mismo
   const filteredMiembros = (miembros || []).filter(miembro => {
@@ -52,12 +56,6 @@ export default async function EquipoPage() {
     const esElMismoUsuarioLogueado = user.id_miembro === miembro.id_miembro || (user.usuario === 'admin' && miembro.usuarios_sistema?.usuario === 'admin');
     return esElMismoUsuarioLogueado;
   });
-
-  // 3. Fetch de cajas activas abiertas para saber quién tiene turno abierto
-  const { data: cajasAbiertas } = await supabase
-    .from('cajas')
-    .select('id_caja, id_usuario, monto_inicial, fecha_apertura')
-    .eq('estado', 'ABIERTA');
 
   return (
     <EquipoLayout 

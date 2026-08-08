@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { buscarClientes, crearCliente } from '@/app/actions/clientes';
 import { venderMembresia } from '@/app/actions/membresias';
 import { registrarVentaProductos, obtenerVentasReportePorDia, subirComprobanteVenta, ReporteVentaItem } from '@/app/actions/ventas_productos';
-import { crearPaymentIntent } from '@/app/actions/stripe';
 import { Cliente, TipoMembresia, MetodoPago, Caja } from '@/types/gym.types';
 import { Producto } from '@/app/actions/productos';
 import Link from 'next/link';
@@ -51,27 +50,24 @@ export default function VentasClient({
   const [saleSuccess, setSaleSuccess] = useState<boolean>(false);
   const [successSaleId, setSuccessSaleId] = useState<number | null>(null);
 
+  // Estado para garantizar montaje limpio del lado cliente (evita hydration errors de extensiones del navegador)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Buscador de clientes
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Cliente[]>([]);
   const [searching, setSearching] = useState(false);
 
+  // Métodos de pago sin Stripe
+  const metodosPagoDisponibles = metodosPago.filter(m => !m.nombre.toLowerCase().includes('stripe'));
+
   // Modal registrar cliente rápido
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-
-  // Stripe Payment State
-  const [showStripeModal, setShowStripeModal] = useState(false);
-  const [stripeProcessing, setStripeProcessing] = useState(false);
-  const [stripeSuccess, setStripeSuccess] = useState(false);
-  const [stripeIntentId, setStripeIntentId] = useState<string>('');
-  
-  // Datos Tarjeta Stripe (Simulado)
-  const [cardName, setCardName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvc, setCardCvc] = useState('');
 
   // Ajustamos el estado durante el renderizado para evitar renders en cascada
   const [prevPreSelectedClient, setPrevPreSelectedClient] = useState<Cliente | null>(preSelectedClient);
@@ -87,7 +83,7 @@ export default function VentasClient({
   const [selectedPlan, setSelectedPlan] = useState<TipoMembresia | null>(null);
   const [fechaInicio] = useState(new Date().toISOString().split('T')[0]);
   const [pagos, setPagos] = useState<PagoItem[]>([
-    { id_metodo: metodosPago[0]?.id_metodo || 0, monto: 0, numero_operacion: '', comprobante_url: '' }
+    { id_metodo: metodosPagoDisponibles[0]?.id_metodo || metodosPago[0]?.id_metodo || 0, monto: 0, numero_operacion: '', comprobante_url: '' }
   ]);
   const [membresiaVoucher, setMembresiaVoucher] = useState<string>('');
 
@@ -96,9 +92,13 @@ export default function VentasClient({
   // =========================================================================
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tiendaSearch, setTiendaSearch] = useState('');
+  const [tiendaCategory, setTiendaCategory] = useState<string>('TODOS');
   const [tiendaPaymentMethod, setTiendaPaymentMethod] = useState<string>('Efectivo');
   const [tiendaOpCode, setTiendaOpCode] = useState<string>('');
   const [tiendaVoucher, setTiendaVoucher] = useState<string>('');
+  const [isProductsModalOpen, setIsProductsModalOpen] = useState<boolean>(false);
+  const [modalProductSearch, setModalProductSearch] = useState<string>('');
+  const [modalStockFilter, setModalStockFilter] = useState<'TODOS' | 'CON_STOCK' | 'POCO_STOCK'>('TODOS');
 
   // =========================================================================
   // ESTADOS MODULO 3: HISTORIAL Y REPORTE DE VENTAS POR DÍA
@@ -129,9 +129,19 @@ export default function VentasClient({
   };
 
   useEffect(() => {
+    let isCancelled = false;
     if (activeMode === 'reporte') {
-      cargarReporte(reporteFecha);
+      obtenerVentasReportePorDia(reporteFecha)
+        .then((data) => {
+          if (!isCancelled) {
+            setReporteVentas(data);
+          }
+        })
+        .catch((e) => console.error(e));
     }
+    return () => {
+      isCancelled = true;
+    };
   }, [activeMode, reporteFecha]);
 
   // Si no hay caja abierta, bloquear checkout
@@ -256,7 +266,7 @@ export default function VentasClient({
   const planPrecio = selectedPlan ? selectedPlan.precio : 0;
   const saldoRestante = planPrecio - totalPagado;
 
-  const handleConfirmarVenta = async (forcedStripeIntentId?: string | React.MouseEvent) => {
+  const handleConfirmarVenta = async () => {
     if (!selectedClient || !selectedPlan) return;
 
     if (Math.abs(saldoRestante) > 0.01) {
@@ -268,29 +278,15 @@ export default function VentasClient({
       return;
     }
 
-    const activeStripeIntentId = typeof forcedStripeIntentId === 'string' ? forcedStripeIntentId : stripeIntentId;
-
-    // Si algún método de pago seleccionado es 'Stripe'
-    const tieneStripe = pagos.some(p => {
-      const mObj = metodosPago.find(m => m.id_metodo === p.id_metodo);
-      return mObj?.nombre.toLowerCase().includes('stripe');
-    });
-
-    if (tieneStripe && !activeStripeIntentId) {
-      setShowStripeModal(true);
-      return;
-    }
-
     setSaving(true);
     setSaleError(null);
 
-    // Ajustar pagos con voucher y stripe
+    // Ajustar pagos con voucher
     const finalPagos = pagos.map(p => {
-      const mObj = metodosPago.find(m => m.id_metodo === p.id_metodo);
+      const mObj = metodosPagoDisponibles.find(m => m.id_metodo === p.id_metodo);
       const isYapeOrPlin = mObj && ['yape', 'plin'].includes(mObj.nombre.toLowerCase());
       return {
         ...p,
-        numero_operacion: mObj?.nombre.toLowerCase().includes('stripe') ? (activeStripeIntentId || 'ch_simulado_stripe') : p.numero_operacion,
         comprobante_url: isYapeOrPlin ? (p.comprobante_url || membresiaVoucher || undefined) : undefined
       };
     });
@@ -325,7 +321,7 @@ export default function VentasClient({
   const filteredProducts = productos.filter(p =>
     p.estado === 'ACTIVO' &&
     (p.nombre.toLowerCase().includes(tiendaSearch.toLowerCase()) ||
-     (p.codigo_barras && p.codigo_barras.includes(tiendaSearch)))
+      (p.codigo_barras && p.codigo_barras.includes(tiendaSearch)))
   );
 
   const addToCart = (prod: Producto) => {
@@ -335,8 +331,8 @@ export default function VentasClient({
         showToast(`Stock máximo alcanzado para "${prod.nombre}" (${prod.stock} unidades).`, 'warning');
         return;
       }
-      setCart(cart.map(c => 
-        c.producto.id_producto === prod.id_producto 
+      setCart(cart.map(c =>
+        c.producto.id_producto === prod.id_producto
           ? { ...c, cantidad: c.cantidad + 1 }
           : c
       ));
@@ -376,15 +372,8 @@ export default function VentasClient({
 
   const totalTienda = cart.reduce((sum, item) => sum + (item.cantidad * item.producto.precio_venta), 0);
 
-  const handleConfirmarVentaTienda = async (forcedStripeIntentId?: string | React.MouseEvent) => {
+  const handleConfirmarVentaTienda = async () => {
     if (cart.length === 0) return;
-
-    const activeStripeIntentId = typeof forcedStripeIntentId === 'string' ? forcedStripeIntentId : stripeIntentId;
-
-    if (tiendaPaymentMethod.toLowerCase() === 'stripe' && !activeStripeIntentId) {
-      setShowStripeModal(true);
-      return;
-    }
 
     setSaving(true);
     setSaleError(null);
@@ -395,7 +384,6 @@ export default function VentasClient({
       precio_unitario: c.producto.precio_venta
     }));
 
-    const finalOpCode = tiendaPaymentMethod.toLowerCase() === 'stripe' ? (activeStripeIntentId || 'ch_simulada_stripe') : tiendaOpCode;
     const isYapeOrPlin = ['yape', 'plin'].includes(tiendaPaymentMethod.toLowerCase());
 
     try {
@@ -403,7 +391,7 @@ export default function VentasClient({
         selectedClient ? selectedClient.id_cliente : null,
         items,
         tiendaPaymentMethod,
-        finalOpCode,
+        tiendaOpCode,
         isYapeOrPlin ? (tiendaVoucher || undefined) : undefined
       );
 
@@ -419,61 +407,6 @@ export default function VentasClient({
       setSaleError(e instanceof Error ? e.message : 'Error desconocido');
     } finally {
       setSaving(false);
-    }
-  };
-
-  // =========================================================================
-  // STRIPE MODAL & GATEWAY (SIMULADO / SANDBOX INTENT)
-  // =========================================================================
-  const handleStripePayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cardNumber || !cardName || !cardExpiry || !cardCvc) {
-      await showAlert({
-        title: 'Datos Incompletos',
-        message: 'Por favor complete todos los datos de la tarjeta de crédito/débito.',
-        type: 'warning'
-      });
-      return;
-    }
-
-    setStripeProcessing(true);
-    const monto = activeMode === 'membresia' ? totalPagado : totalTienda;
-
-    try {
-      const res = await crearPaymentIntent(monto);
-      
-      setTimeout(() => {
-        setStripeProcessing(false);
-        if (res.error) {
-          showAlert({
-            title: 'Error de Procesamiento',
-            message: res.error,
-            type: 'danger'
-          });
-        } else {
-          setStripeSuccess(true);
-          const intentId = res.clientSecret?.split('_secret_')[0] || 'ch_' + Math.random().toString(36).substring(2, 10);
-          setStripeIntentId(intentId);
-          setTimeout(() => {
-            setShowStripeModal(false);
-            setStripeSuccess(false);
-            if (activeMode === 'membresia') {
-              handleConfirmarVenta(intentId);
-            } else {
-              handleConfirmarVentaTienda(intentId);
-            }
-          }, 1000);
-        }
-      }, 1500);
-
-    } catch (err) {
-      console.error(err);
-      setStripeProcessing(false);
-      await showAlert({
-        title: 'Error en Pasarela Stripe',
-        message: 'No se pudo conectar con la pasarela de pagos Stripe.',
-        type: 'danger'
-      });
     }
   };
 
@@ -523,12 +456,11 @@ export default function VentasClient({
     setSelectedClient(null);
     setSelectedPlan(null);
     setCart([]);
-    setPagos([{ id_metodo: metodosPago[0]?.id_metodo || 0, monto: 0, numero_operacion: '', comprobante_url: '' }]);
+    setPagos([{ id_metodo: metodosPagoDisponibles[0]?.id_metodo || metodosPago[0]?.id_metodo || 0, monto: 0, numero_operacion: '', comprobante_url: '' }]);
     setMembresiaStep(1);
     setSaleError(null);
     setSaleSuccess(false);
     setSuccessSaleId(null);
-    setStripeIntentId('');
     setMembresiaVoucher('');
     setTiendaVoucher('');
   };
@@ -553,15 +485,29 @@ export default function VentasClient({
   const totalPlin = reporteVentas.filter(v => v.metodoPago.toLowerCase().includes('plin')).reduce((sum, v) => sum + v.total, 0);
   const totalStripe = reporteVentas.filter(v => v.metodoPago.toLowerCase().includes('stripe')).reduce((sum, v) => sum + v.total, 0);
 
+  // Skeleton de carga para sincronización de hidratación inicial segura
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-800/60" />
+        <div suppressHydrationWarning className="h-10 w-80 rounded-xl bg-zinc-200/60 dark:bg-zinc-800/60" />
+        <div suppressHydrationWarning className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          <div suppressHydrationWarning className="lg:col-span-2 h-[550px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-800/60" />
+          <div suppressHydrationWarning className="h-[550px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-800/60" />
+        </div>
+      </div>
+    );
+  }
+
   // =========================================================================
   // PANTALLA ÉXITO
   // =========================================================================
   if (saleSuccess) {
     return (
-      <div className="max-w-md mx-auto text-center space-y-6 pt-12">
-        <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+      <div suppressHydrationWarning className="max-w-md mx-auto text-center space-y-6 pt-12">
+        <div suppressHydrationWarning className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-2 bg-emerald-500"></div>
-          
+
           <div className="mx-auto w-16 h-16 rounded-full bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mb-4 animate-bounce">
             <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -569,7 +515,7 @@ export default function VentasClient({
           </div>
 
           <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight">¡Venta Procesada!</h2>
-          
+
           <div className="p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-150/50 dark:border-zinc-850 text-xs text-zinc-600 dark:text-zinc-400 mt-4 leading-relaxed font-semibold">
             El cobro se ha validado y se ha registrado el ingreso en la caja diaria activa. El comprobante virtual #{successSaleId || 'N/A'} ha sido emitido.
           </div>
@@ -594,7 +540,7 @@ export default function VentasClient({
   }
 
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-blue-600/10 blur-3xl"></div>
@@ -615,11 +561,10 @@ export default function VentasClient({
             setActiveMode('membresia');
             setSaleError(null);
           }}
-          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-            activeMode === 'membresia'
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${activeMode === 'membresia'
               ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 font-extrabold'
               : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
-          }`}
+            }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
@@ -631,11 +576,10 @@ export default function VentasClient({
             setActiveMode('tienda');
             setSaleError(null);
           }}
-          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-            activeMode === 'tienda'
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${activeMode === 'tienda'
               ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 font-extrabold'
               : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
-          }`}
+            }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
@@ -647,11 +591,10 @@ export default function VentasClient({
             setActiveMode('reporte');
             setSaleError(null);
           }}
-          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-            activeMode === 'reporte'
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${activeMode === 'reporte'
               ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 font-extrabold'
               : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
-          }`}
+            }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -719,7 +662,7 @@ export default function VentasClient({
                     placeholder="Escribe DNI o Nombre para buscar cliente..."
                     className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-850 dark:text-zinc-50 focus:outline-none"
                   />
-                  
+
                   {searching ? (
                     <div className="py-2 text-center text-xs text-zinc-400 font-medium">Buscando...</div>
                   ) : searchResults.length > 0 ? (
@@ -749,7 +692,7 @@ export default function VentasClient({
                 {membresiaStep === 1 && (
                   <div className="bg-white border border-zinc-200/80 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-xs p-6 space-y-4">
                     <h3 className="font-bold text-zinc-850 dark:text-zinc-100 text-sm">Paso 2: Seleccionar Plan de Membresía</h3>
-                    
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {planes.map((p) => {
                         const isSelected = selectedPlan?.id_tipo === p.id_tipo;
@@ -762,11 +705,10 @@ export default function VentasClient({
                                 setPagos([{ ...pagos[0], monto: p.precio }]);
                               }
                             }}
-                            className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer ${
-                              isSelected
+                            className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer ${isSelected
                                 ? 'border-blue-500 bg-blue-50/50 dark:border-blue-500 dark:bg-blue-950/30 shadow-xs ring-1 ring-blue-500/30'
                                 : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-750'
-                            }`}
+                              }`}
                           >
                             <div className="flex justify-between items-start">
                               <h4 className="font-bold text-zinc-850 dark:text-zinc-100 text-xs truncate pr-2">{p.nombre}</h4>
@@ -811,8 +753,7 @@ export default function VentasClient({
 
                     <div className="space-y-3">
                       {pagos.map((pago, idx) => {
-                        const mObj = metodosPago.find(m => m.id_metodo === pago.id_metodo);
-                        const esStripeSelected = mObj?.nombre.toLowerCase().includes('stripe');
+                        const mObj = metodosPagoDisponibles.find(m => m.id_metodo === pago.id_metodo) || metodosPago[0];
                         const esYapeOrPlin = mObj && ['yape', 'plin'].includes(mObj.nombre.toLowerCase());
 
                         return (
@@ -825,7 +766,7 @@ export default function VentasClient({
                                   onChange={(e) => updatePagoField(idx, 'id_metodo', e.target.value)}
                                   className="w-full bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
                                 >
-                                  {metodosPago.map((m) => (
+                                  {metodosPagoDisponibles.map((m) => (
                                     <option key={m.id_metodo} value={m.id_metodo}>{m.nombre}</option>
                                   ))}
                                 </select>
@@ -844,15 +785,14 @@ export default function VentasClient({
 
                               <div className="flex-1 space-y-1">
                                 <label className="text-[9px] font-bold text-zinc-400 uppercase">
-                                  {esStripeSelected ? 'Operación Stripe' : 'Nº Operación / Ref'}
+                                  Nº Operación / Ref
                                 </label>
                                 <input
                                   type="text"
-                                  value={esStripeSelected ? (stripeIntentId ? `Aprobado ID: ${stripeIntentId}` : 'Pendiente Pasarela') : pago.numero_operacion}
-                                  disabled={esStripeSelected}
+                                  value={pago.numero_operacion}
                                   onChange={(e) => updatePagoField(idx, 'numero_operacion', e.target.value)}
-                                  placeholder={esStripeSelected ? 'Stripe Pay' : 'Opcional'}
-                                  className="w-full bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none disabled:opacity-75 disabled:bg-zinc-50 dark:disabled:bg-zinc-950 font-bold"
+                                  placeholder="Opcional"
+                                  className="w-full bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none font-medium"
                                 />
                               </div>
 
@@ -889,7 +829,7 @@ export default function VentasClient({
                                 <p className="text-[10px] text-amber-700 dark:text-amber-300">
                                   Los pagos vía Yape y Plin requieren captura de pantalla de la transferencia.
                                 </p>
-                                
+
                                 {membresiaVoucher ? (
                                   <div className="flex items-center gap-3 pt-1">
                                     <img src={membresiaVoucher} alt="Voucher" className="w-16 h-16 object-cover rounded-lg border border-amber-300" />
@@ -934,72 +874,182 @@ export default function VentasClient({
             )}
 
             {/* MODO 2: FLUJO DE TIENDA Y STOCK DE PRODUCTOS */}
-            {activeMode === 'tienda' && (
-              <div className="bg-white border border-zinc-200/80 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-xs p-6 space-y-4">
-                <div className="flex justify-between items-center flex-wrap gap-2">
-                  <h3 className="font-bold text-zinc-850 dark:text-zinc-100 text-sm">Paso 2: Agregar Productos al Carrito</h3>
-                  <input
-                    type="text"
-                    value={tiendaSearch}
-                    onChange={(e) => setTiendaSearch(e.target.value)}
-                    placeholder="Filtro rápido suplementos/cód..."
-                    className="bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-850 dark:text-zinc-50 focus:outline-none w-56"
-                  />
-                </div>
+            {activeMode === 'tienda' && (() => {
+              const filteredProducts = productos.filter((p) => {
+                const matchSearch = p.nombre.toLowerCase().includes(tiendaSearch.toLowerCase()) ||
+                  (p.codigo_barras && p.codigo_barras.toLowerCase().includes(tiendaSearch.toLowerCase())) ||
+                  (p.descripcion && p.descripcion.toLowerCase().includes(tiendaSearch.toLowerCase()));
+                return matchSearch && p.estado === 'ACTIVO';
+              });
 
-                {filteredProducts.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[48vh] overflow-y-auto pr-1">
-                    {filteredProducts.map((p) => {
-                      const inCart = cart.find(c => c.producto.id_producto === p.id_producto);
-                      const qtyInCart = inCart?.cantidad || 0;
-                      const stockRestante = p.stock - qtyInCart;
+              return (
+                <div className="bg-white border border-zinc-200/80 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-xs p-6 space-y-4">
+                  {/* Encabezado y Barra de Búsqueda */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <h3 className="font-bold text-zinc-850 dark:text-zinc-100 text-sm">Catálogo de Productos y Suplementos</h3>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Selecciona los productos para agregarlos al carrito de compra ({filteredProducts.length} disponibles).</p>
+                    </div>
 
-                      return (
-                        <div
-                          key={p.id_producto}
-                          className="p-3 border border-zinc-150 dark:border-zinc-850 rounded-xl flex gap-3 items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/40"
-                        >
-                          <div className="flex gap-2 items-center min-w-0">
-                            <div className="w-10 h-10 rounded-lg bg-zinc-100 border overflow-hidden shrink-0 flex items-center justify-center dark:bg-zinc-850 dark:border-zinc-800">
-                              {p.imagen_url ? (
-                                <img src={p.imagen_url} alt={p.nombre} className="w-full h-full object-cover" />
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                      <div className="relative flex-1 sm:w-56">
+                        <input
+                          type="text"
+                          value={tiendaSearch}
+                          onChange={(e) => setTiendaSearch(e.target.value)}
+                          placeholder="Buscar suplemento o código..."
+                          className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl pl-8 pr-3 py-2 text-xs text-zinc-850 dark:text-zinc-50 focus:outline-none"
+                        />
+                        <svg className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        {tiendaSearch && (
+                          <button
+                            onClick={() => setTiendaSearch('')}
+                            className="absolute right-2.5 top-2.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalProductSearch('');
+                          setIsProductsModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer shadow-xs"
+                        title="Abrir ventana con todo el catálogo para selección rápida"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                        </svg>
+                        <span>Ver Todo el Catálogo</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Listado de Productos en Grid */}
+                  {filteredProducts.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[52vh] overflow-y-auto pr-1">
+                      {filteredProducts.map((p) => {
+                        const inCart = cart.find(c => c.producto.id_producto === p.id_producto);
+                        const qtyInCart = inCart?.cantidad || 0;
+                        const stockRestante = p.stock - qtyInCart;
+
+                        return (
+                          <div
+                            key={p.id_producto}
+                            className={`p-3.5 border rounded-2xl flex flex-col justify-between gap-3 transition-all ${qtyInCart > 0
+                                ? 'border-blue-500/50 bg-blue-50/20 dark:bg-blue-950/10 dark:border-blue-800/40 shadow-xs'
+                                : 'border-zinc-200/80 dark:border-zinc-850 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300 dark:hover:border-zinc-750'
+                              }`}
+                          >
+                            <div className="flex gap-3 items-start min-w-0">
+                              <div className="w-14 h-14 rounded-xl bg-white dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center shadow-2xs">
+                                {p.imagen_url ? (
+                                  <img src={p.imagen_url} alt={p.nombre} className="w-full h-full object-cover" />
+                                ) : (
+                                  <svg className="w-6 h-6 text-zinc-300 dark:text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                                  </svg>
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                {p.codigo_barras && (
+                                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block truncate">
+                                    Cód: {p.codigo_barras}
+                                  </span>
+                                )}
+                                <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-xs leading-snug truncate" title={p.nombre}>
+                                  {p.nombre}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                  <span className="text-xs font-black text-blue-600 dark:text-blue-400">
+                                    S/ {p.precio_venta.toFixed(2)}
+                                  </span>
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${stockRestante > 5
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                      : stockRestante > 0
+                                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                                        : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                                    }`}>
+                                    {stockRestante > 0 ? `Stock: ${stockRestante}` : 'Agotado'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-2 border-t border-zinc-150/60 dark:border-zinc-850/60">
+                              {qtyInCart > 0 ? (
+                                <div className="flex items-center gap-2 w-full justify-between">
+                                  <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                                    En Carrito: {qtyInCart}
+                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => updateCartQty(p.id_producto, qtyInCart - 1)}
+                                      className="w-6 h-6 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-800 dark:text-zinc-200 rounded-lg flex items-center justify-center font-bold text-xs cursor-pointer"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="font-black text-xs w-5 text-center">{qtyInCart}</span>
+                                    <button
+                                      onClick={() => updateCartQty(p.id_producto, qtyInCart + 1)}
+                                      disabled={stockRestante <= 0}
+                                      className="w-6 h-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center font-bold text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </div>
                               ) : (
-                                <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-                                </svg>
+                                <button
+                                  onClick={() => addToCart(p)}
+                                  disabled={stockRestante <= 0}
+                                  className="w-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold py-2 rounded-xl cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-xs flex items-center justify-center gap-1"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                  </svg>
+                                  Agregar al Carrito
+                                </button>
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-xs truncate">{p.nombre}</h4>
-                              <p className="text-[10px] text-zinc-400 font-semibold mt-0.5">S/ {p.precio_venta.toFixed(2)} — Stock: {stockRestante}</p>
-                            </div>
                           </div>
-
-                          <button
-                            onClick={() => addToCart(p)}
-                            disabled={stockRestante <= 0}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-xs"
-                          >
-                            + Agregar
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-8 text-center text-xs text-zinc-400">
-                    No hay productos activos para vender.
-                  </div>
-                )}
-              </div>
-            )}
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-10 text-center text-xs text-zinc-400 bg-zinc-50/50 dark:bg-zinc-950/40 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 space-y-3">
+                      <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-850 text-zinc-400 mx-auto flex items-center justify-center">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                      </div>
+                      <p>No se encontraron productos con el filtro aplicado.</p>
+                      {tiendaSearch && (
+                        <button
+                          onClick={() => setTiendaSearch('')}
+                          className="text-blue-600 font-bold hover:underline cursor-pointer"
+                        >
+                          Limpiar búsqueda
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* COLUMNA DERECHA: TICKET VIRTUAL DE CHECKOUT */}
           <div className="lg:col-span-1">
             <div className="bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-850 rounded-2xl shadow-md p-6 space-y-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-blue-600"></div>
-              
+
               <div className="text-center pb-4 border-b border-dashed border-zinc-200 dark:border-zinc-850">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Resumen de Venta</p>
                 <h3 className="text-sm font-black text-zinc-800 dark:text-zinc-200 mt-1">TICKET VIRTUAL</h3>
@@ -1109,14 +1159,14 @@ export default function VentasClient({
                         onChange={(e) => setTiendaPaymentMethod(e.target.value)}
                         className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
                       >
-                        {['Efectivo', 'Yape', 'Plin', 'Stripe'].map((met) => (
+                        {['Efectivo', 'Yape', 'Plin', 'Tarjeta', 'Transferencia'].map((met) => (
                           <option key={met} value={met}>{met}</option>
                         ))}
                       </select>
                     </div>
 
                     {/* ADJUNTO DE FOTO YAPE / PLIN EN TIENDA */}
-                    {['yape', 'plin'].includes(tiendaPaymentMethod.toLowerCase()) ? (
+                    {['yape', 'plin'].includes(tiendaPaymentMethod.toLowerCase()) && (
                       <div className="p-3 bg-amber-50/70 border border-amber-200/80 dark:bg-amber-950/20 dark:border-amber-900/40 rounded-xl space-y-2">
                         <span className="font-bold text-amber-850 dark:text-amber-400 text-[10px] block">
                           📸 Foto Comprobante ({tiendaPaymentMethod}):
@@ -1127,7 +1177,7 @@ export default function VentasClient({
                             <button
                               type="button"
                               onClick={() => setTiendaVoucher('')}
-                              className="text-[9px] text-rose-600 font-bold hover:underline"
+                              className="text-[9px] text-rose-600 font-bold hover:underline cursor-pointer"
                             >
                               Cambiar foto
                             </button>
@@ -1144,21 +1194,7 @@ export default function VentasClient({
                           />
                         )}
                       </div>
-                    ) : tiendaPaymentMethod.toLowerCase() === 'stripe' ? (
-                      <div className="text-center pt-1">
-                        {stripeIntentId ? (
-                          <span className="text-[10px] text-emerald-600 font-bold">✓ Pago Stripe Autorizado! ID: {stripeIntentId}</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setShowStripeModal(true)}
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-xl cursor-pointer shadow-md shadow-blue-500/20"
-                          >
-                            Pagar con Stripe S/ {totalTienda.toFixed(2)}
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
+                    )}
 
                     <div className="flex justify-between items-center text-sm pt-2">
                       <span className="font-bold text-zinc-800 dark:text-zinc-200">Total a Pagar:</span>
@@ -1175,7 +1211,7 @@ export default function VentasClient({
 
                     <button
                       onClick={handleConfirmarVentaTienda}
-                      disabled={saving || cart.length === 0 || (tiendaPaymentMethod.toLowerCase() === 'stripe' && !stripeIntentId)}
+                      disabled={saving || cart.length === 0}
                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl text-xs font-black transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-emerald-500/20"
                     >
                       {saving ? 'Registrando Venta...' : 'Confirmar Venta de Tienda'}
@@ -1239,25 +1275,35 @@ export default function VentasClient({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
               <div className="bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 p-3.5 rounded-xl">
                 <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider block">Total Recaudado</span>
-                <span className="text-base font-black text-blue-950 dark:text-blue-100 mt-1 block">S/ {totalDiaRecaudado.toFixed(2)}</span>
+                <span className="text-base font-black text-blue-950 dark:text-blue-100 mt-1 block">
+                  S/ {reporteVentas.reduce((sum, v) => sum + v.total, 0).toFixed(2)}
+                </span>
               </div>
-              <div className="bg-zinc-50 dark:bg-zinc-850/60 border border-zinc-150 dark:border-zinc-800 p-3.5 rounded-xl">
+              <div className="bg-zinc-50 dark:bg-zinc-850/60 border border-zinc-150 dark:border-zinc-850 p-3.5 rounded-xl">
                 <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Efectivo</span>
-                <span className="text-sm font-black text-zinc-800 dark:text-zinc-100 mt-1 block">S/ {totalEfectivo.toFixed(2)}</span>
+                <span className="text-sm font-black text-zinc-800 dark:text-zinc-100 mt-1 block">
+                  S/ {reporteVentas.filter(v => v.metodoPago.toLowerCase().includes('efectivo')).reduce((sum, v) => sum + v.total, 0).toFixed(2)}
+                </span>
               </div>
               <div className="bg-purple-50/60 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30 p-3.5 rounded-xl">
                 <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider block">Yape</span>
-                <span className="text-sm font-black text-purple-950 dark:text-purple-100 mt-1 block">S/ {totalYape.toFixed(2)}</span>
+                <span className="text-sm font-black text-purple-950 dark:text-purple-100 mt-1 block">
+                  S/ {reporteVentas.filter(v => v.metodoPago.toLowerCase().includes('yape')).reduce((sum, v) => sum + v.total, 0).toFixed(2)}
+                </span>
               </div>
               <div className="bg-cyan-50/60 dark:bg-cyan-950/20 border border-cyan-100 dark:border-cyan-900/30 p-3.5 rounded-xl">
                 <span className="text-[9px] font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider block">Plin</span>
-                <span className="text-sm font-black text-cyan-950 dark:text-cyan-100 mt-1 block">S/ {totalPlin.toFixed(2)}</span>
+                <span className="text-sm font-black text-cyan-950 dark:text-cyan-100 mt-1 block">
+                  S/ {reporteVentas.filter(v => v.metodoPago.toLowerCase().includes('plin')).reduce((sum, v) => sum + v.total, 0).toFixed(2)}
+                </span>
               </div>
               <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 p-3.5 rounded-xl">
-                <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Stripe</span>
-                <span className="text-sm font-black text-indigo-950 dark:text-indigo-100 mt-1 block">S/ {totalStripe.toFixed(2)}</span>
+                <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Tarjeta / Transf.</span>
+                <span className="text-sm font-black text-indigo-950 dark:text-indigo-100 mt-1 block">
+                  S/ {reporteVentas.filter(v => !['efectivo', 'yape', 'plin'].includes(v.metodoPago.toLowerCase())).reduce((sum, v) => sum + v.total, 0).toFixed(2)}
+                </span>
               </div>
-              <div className="bg-zinc-50 dark:bg-zinc-850/60 border border-zinc-150 dark:border-zinc-800 p-3.5 rounded-xl">
+              <div className="bg-zinc-50 dark:bg-zinc-850/60 border border-zinc-150 dark:border-zinc-850 p-3.5 rounded-xl">
                 <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Nº Operaciones</span>
                 <span className="text-sm font-black text-zinc-800 dark:text-zinc-100 mt-1 block">{reporteVentas.length} Tickets</span>
               </div>
@@ -1314,11 +1360,10 @@ export default function VentasClient({
                             #{v.id}
                           </td>
                           <td className="p-4">
-                            <span className={`inline-block px-2 py-0.5 rounded font-black text-[9px] uppercase ${
-                              v.tipoVenta === 'MEMBRESIA'
+                            <span className={`inline-block px-2 py-0.5 rounded font-black text-[9px] uppercase ${v.tipoVenta === 'MEMBRESIA'
                                 ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
                                 : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                            }`}>
+                              }`}>
                               {v.tipoVenta === 'MEMBRESIA' ? 'Membresía' : 'Tienda'}
                             </span>
                           </td>
@@ -1333,16 +1378,15 @@ export default function VentasClient({
                             {v.usuarioNombre}
                           </td>
                           <td className="p-4">
-                            <span className={`inline-block px-2 py-0.5 rounded font-bold text-[10px] ${
-                              v.metodoPago.toLowerCase().includes('yape') ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300' :
-                              v.metodoPago.toLowerCase().includes('plin') ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300' :
-                              v.metodoPago.toLowerCase().includes('stripe') ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300' :
-                              'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                            }`}>
+                            <span className={`inline-block px-2 py-0.5 rounded font-bold text-[10px] ${v.metodoPago.toLowerCase().includes('yape') ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300' :
+                                v.metodoPago.toLowerCase().includes('plin') ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300' :
+                                  v.metodoPago.toLowerCase().includes('stripe') ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300' :
+                                    'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                              }`}>
                               {v.metodoPago}
                             </span>
                           </td>
-                          
+
                           {/* ESTADO DEL COMPROBANTE DE YAPE / PLIN */}
                           <td className="p-4">
                             {isYapeOrPlin ? (
@@ -1410,7 +1454,7 @@ export default function VentasClient({
                 </svg>
               </button>
             </div>
-            
+
             <form onSubmit={handleQuickClientSubmit} className="p-6 space-y-4">
               {formError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold">
@@ -1601,7 +1645,7 @@ export default function VentasClient({
             </div>
             <div className="p-6 space-y-4 text-xs">
               <p className="text-zinc-500 font-semibold">{uploadModalItem.titulo}</p>
-              
+
               <div className="border-2 border-dashed border-zinc-300 dark:border-zinc-700 p-6 rounded-2xl text-center space-y-3">
                 {newVoucherBase64 ? (
                   <div className="space-y-2">
@@ -1659,118 +1703,243 @@ export default function VentasClient({
         </div>
       )}
 
-      {/* ----------------- MODAL STRIPE PAYMENT ----------------- */}
-      {showStripeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-850">
-            <div className="px-6 py-5 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <span className="text-blue-600 font-extrabold text-sm tracking-wide">stripe</span>
-                <span className="text-[10px] text-zinc-400 font-bold bg-zinc-100 px-1.5 py-0.5 rounded">Pasarela Segura</span>
+      {/* ----------------- MODAL CATÁLOGO COMPLETO DE PRODUCTOS ----------------- */}
+      {isProductsModalOpen && (() => {
+        const modalFiltered = productos.filter((p) => {
+          if (p.estado !== 'ACTIVO') return false;
+          const q = modalProductSearch.toLowerCase().trim();
+          const matchQ = !q || 
+            p.nombre.toLowerCase().includes(q) ||
+            (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
+            (p.descripcion && p.descripcion.toLowerCase().includes(q));
+          
+          if (!matchQ) return false;
+
+          if (modalStockFilter === 'CON_STOCK') return p.stock > 0;
+          if (modalStockFilter === 'POCO_STOCK') return p.stock > 0 && p.stock <= 5;
+          return true;
+        });
+
+        const totalItemsInCart = cart.reduce((sum, item) => sum + item.cantidad, 0);
+        const totalPriceInCart = cart.reduce((sum, item) => sum + (item.cantidad * item.producto.precio_venta), 0);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-zinc-950/70 backdrop-blur-xs">
+            <div className="bg-white dark:bg-zinc-900 w-full max-w-5xl h-[90vh] max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+              {/* Header del Modal */}
+              <div className="px-6 py-4 border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-850/50 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-black">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-black text-zinc-900 dark:text-zinc-50">Catálogo Completo de Productos</h2>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+                        {modalFiltered.length} disponibles
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-500">Selecciona y ajusta las cantidades para agregarlos directamente a tu ticket.</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setIsProductsModalOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-850 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer text-sm font-bold"
+                  title="Cerrar catálogo"
+                >
+                  ✕
+                </button>
               </div>
-              <button
-                onClick={() => setShowStripeModal(false)}
-                className="text-zinc-400 hover:text-zinc-650 transition-colors p-1"
-              >
-                ✕
-              </button>
+
+              {/* Filtros y Buscador del Modal */}
+              <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={modalProductSearch}
+                    onChange={(e) => setModalProductSearch(e.target.value)}
+                    placeholder="Buscar por nombre, código de barras o descripción..."
+                    className="w-full bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-750 text-xs rounded-xl pl-9 pr-8 py-2.5 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <svg className="w-4 h-4 text-zinc-400 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {modalProductSearch && (
+                    <button
+                      onClick={() => setModalProductSearch('')}
+                      className="absolute right-3 top-2.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                  <button
+                    onClick={() => setModalStockFilter('TODOS')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      modalStockFilter === 'TODOS'
+                        ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-xs'
+                        : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    Todos ({productos.filter(p => p.estado === 'ACTIVO').length})
+                  </button>
+                  <button
+                    onClick={() => setModalStockFilter('CON_STOCK')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      modalStockFilter === 'CON_STOCK'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    Con Stock ({productos.filter(p => p.estado === 'ACTIVO' && p.stock > 0).length})
+                  </button>
+                  <button
+                    onClick={() => setModalStockFilter('POCO_STOCK')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      modalStockFilter === 'POCO_STOCK'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    Poco Stock (≤5)
+                  </button>
+                </div>
+              </div>
+
+              {/* Grid de Productos dentro del Modal */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {modalFiltered.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {modalFiltered.map((p) => {
+                      const inCart = cart.find(c => c.producto.id_producto === p.id_producto);
+                      const qtyInCart = inCart?.cantidad || 0;
+                      const stockRestante = p.stock - qtyInCart;
+
+                      return (
+                        <div
+                          key={p.id_producto}
+                          className={`p-4 border rounded-2xl flex flex-col justify-between gap-3 transition-all ${
+                            qtyInCart > 0
+                              ? 'border-blue-500 bg-blue-50/30 dark:bg-blue-950/20 dark:border-blue-700 shadow-sm ring-1 ring-blue-500/30'
+                              : 'border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-xs'
+                          }`}
+                        >
+                          <div className="space-y-3">
+                            <div className="w-full h-32 rounded-xl bg-white dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 overflow-hidden flex items-center justify-center shadow-2xs relative">
+                              {p.imagen_url ? (
+                                <img src={p.imagen_url} alt={p.nombre} className="w-full h-full object-cover" />
+                              ) : (
+                                <svg className="w-10 h-10 text-zinc-300 dark:text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                                </svg>
+                              )}
+                              {p.codigo_barras && (
+                                <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-zinc-900/80 text-white text-[9px] font-mono font-bold tracking-tight">
+                                  {p.codigo_barras}
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <h4 className="font-bold text-zinc-900 dark:text-zinc-100 text-xs leading-snug line-clamp-2" title={p.nombre}>
+                                {p.nombre}
+                              </h4>
+                              {p.descripcion && (
+                                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-1">
+                                  {p.descripcion}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between gap-2 mt-2">
+                                <span className="text-sm font-black text-blue-600 dark:text-blue-400">
+                                  S/ {p.precio_venta.toFixed(2)}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  stockRestante > 5
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                                    : stockRestante > 0
+                                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                                    : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                                }`}>
+                                  {stockRestante > 0 ? `Stock: ${stockRestante}` : 'Agotado'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-zinc-150 dark:border-zinc-800">
+                            {qtyInCart > 0 ? (
+                              <div className="flex items-center justify-between gap-2 bg-blue-600 text-white rounded-xl p-1 shadow-xs">
+                                <button
+                                  onClick={() => updateCartQty(p.id_producto, qtyInCart - 1)}
+                                  className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center font-black text-xs cursor-pointer transition-colors"
+                                >
+                                  -
+                                </button>
+                                <span className="font-black text-xs px-1">
+                                  {qtyInCart} en carrito
+                                </span>
+                                <button
+                                  onClick={() => updateCartQty(p.id_producto, qtyInCart + 1)}
+                                  disabled={stockRestante <= 0}
+                                  className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center font-black text-xs cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => addToCart(p)}
+                                disabled={p.stock <= 0}
+                                className="w-full bg-zinc-900 hover:bg-blue-600 text-white dark:bg-zinc-800 dark:hover:bg-blue-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <span>+ Agregar al Carrito</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-16 text-center text-zinc-400 space-y-2">
+                    <span className="text-4xl block">🔍</span>
+                    <p className="text-sm font-bold text-zinc-600 dark:text-zinc-300">No se encontraron productos coincidentes.</p>
+                    <p className="text-xs">Prueba con otro término de búsqueda o cambia los filtros de stock.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer del Modal con Resumen de Carrito */}
+              <div className="px-6 py-4 border-t border-zinc-150 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-850/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="text-zinc-500 font-medium">
+                    En Carrito: <strong className="text-zinc-900 dark:text-zinc-100">{totalItemsInCart} producto(s)</strong>
+                  </span>
+                  <span className="text-zinc-500 font-medium">
+                    Total a Cobrar: <strong className="text-emerald-600 dark:text-emerald-400 font-black text-sm">S/ {totalPriceInCart.toFixed(2)}</strong>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <button
+                    onClick={() => setIsProductsModalOpen(false)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-black text-xs transition-colors cursor-pointer shadow-md"
+                  >
+                    ✓ Listo, Volver a Ticket Virtual
+                  </button>
+                </div>
+              </div>
             </div>
-
-            <form onSubmit={handleStripePayment} className="p-6 space-y-5">
-              <div className="text-center bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-150/40">
-                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Importe a debitar</span>
-                <span className="text-2xl font-black text-zinc-800 dark:text-zinc-100 mt-1 block">
-                  S/ {(activeMode === 'membresia' ? totalPagado : totalTienda).toFixed(2)}
-                </span>
-              </div>
-
-              {stripeSuccess ? (
-                <div className="py-6 text-center space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center animate-bounce">
-                    ✓
-                  </div>
-                  <p className="text-xs font-black text-emerald-600">✓ Pago Stripe Autorizado Correctamente</p>
-                </div>
-              ) : stripeProcessing ? (
-                <div className="py-8 text-center space-y-3">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-3 border-blue-600 border-t-transparent"></div>
-                  <p className="text-xs text-zinc-400 font-bold">Procesando pago con Stripe 3D Secure...</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-zinc-400 uppercase">Titular de la Tarjeta</label>
-                      <input
-                        type="text"
-                        required
-                        value={cardName}
-                        onChange={(e) => setCardName(e.target.value)}
-                        placeholder="Ej. Juan Pérez"
-                        className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-zinc-400 uppercase">Número de Tarjeta</label>
-                      <input
-                        type="text"
-                        required
-                        value={cardNumber}
-                        onChange={(e) => setCardNumber(e.target.value)}
-                        placeholder="4242 4242 4242 4242"
-                        className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase">Expiración</label>
-                        <input
-                          type="text"
-                          required
-                          value={cardExpiry}
-                          onChange={(e) => setCardExpiry(e.target.value)}
-                          placeholder="MM/AA"
-                          className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold text-zinc-400 uppercase">CVC / CVV</label>
-                        <input
-                          type="password"
-                          required
-                          maxLength={3}
-                          value={cardCvc}
-                          onChange={(e) => setCardCvc(e.target.value)}
-                          placeholder="***"
-                          className="w-full bg-zinc-50 border border-zinc-200 dark:bg-zinc-850 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-50 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowStripeModal(false)}
-                      className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-850 dark:hover:bg-zinc-800 dark:text-zinc-200 py-3 rounded-xl text-xs font-bold cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-xs font-black cursor-pointer shadow-md shadow-blue-500/20"
-                    >
-                      Autorizar Cobro
-                    </button>
-                  </div>
-                </div>
-              )}
-            </form>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
     </div>
   );
 }

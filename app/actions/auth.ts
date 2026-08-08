@@ -203,6 +203,11 @@ export async function getSesionActual() {
   const idMiembro = sesion.usuarios_sistema.id_miembro;
   const permisos: string[] = [];
   const modulos = new Set<string>();
+  const roles: string[] = [];
+
+  if (sesion.usuarios_sistema.usuario === 'admin') {
+    roles.push('Super Admin');
+  }
 
   if (idMiembro) {
     // 1. Obtener los IDs y nombres de rol del miembro
@@ -212,10 +217,12 @@ export async function getSesionActual() {
       .eq('id_miembro', idMiembro);
 
     const rolIds = equipoRoles?.map(r => r.id_rol) || [];
-    const rolesNombres = equipoRoles?.map(r => {
+    const rolesNombres = (equipoRoles?.map(r => {
       const rObj = Array.isArray(r.roles) ? r.roles[0] : r.roles;
       return rObj?.nombre;
-    }).filter(Boolean) || [];
+    }).filter(Boolean) || []) as string[];
+
+    roles.push(...rolesNombres);
 
     const esAdministrador = rolesNombres.includes('Administrador') || sesion.usuarios_sistema.usuario === 'admin';
 
@@ -256,6 +263,7 @@ export async function getSesionActual() {
   return {
     ...sesion.usuarios_sistema,
     permisos,
-    modulos: Array.from(modulos)
+    modulos: Array.from(modulos),
+    roles
   };
 }

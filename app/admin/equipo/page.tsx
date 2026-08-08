@@ -53,11 +53,18 @@ export default async function EquipoPage() {
     return esElMismoUsuarioLogueado;
   });
 
+  // 3. Fetch de cajas activas abiertas para saber quién tiene turno abierto
+  const { data: cajasAbiertas } = await supabase
+    .from('cajas')
+    .select('id_caja, id_usuario, monto_inicial, fecha_apertura')
+    .eq('estado', 'ABIERTA');
+
   return (
     <EquipoLayout 
       initialMembers={filteredMiembros} 
       roles={roles || []} 
       isAdmin={userIsAdmin}
+      cajasAbiertas={cajasAbiertas || []}
     />
   );
 }

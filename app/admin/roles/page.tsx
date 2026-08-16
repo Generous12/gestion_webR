@@ -6,7 +6,14 @@ import { redirect } from 'next/navigation';
 
 export default async function RolesPage() {
   const user = await getSesionActual();
-  if (!user || (user.usuario !== 'admin' && !user.modulos?.includes('RolesPermisos'))) {
+  if (!user) {
+    redirect('/login');
+  }
+
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tienePermiso = user.modulos?.includes('RolesPermisos') || user.modulos?.includes('Roles') || user.permisos?.includes('RolesPermisos') || user.permisos?.includes('Roles');
+
+  if (!esAdmin && !tienePermiso) {
     redirect('/admin');
   }
 

@@ -2,13 +2,9 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
-import crypto from 'crypto';
 import { UsuarioSistema } from '@/types/database.types';
 import { getSesionActual } from '@/app/actions/auth';
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
+import { hashPassword, verifyPassword } from '@/utils/security';
 
 export async function crearMiembro(formData: FormData) {
   const loggedInUser = await getSesionActual();
@@ -17,7 +13,9 @@ export async function crearMiembro(formData: FormData) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tienePermiso = (loggedInUser as any).permisos?.includes('EquipoUsuarios') || loggedInUser.usuario === 'admin';
+  const esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tienePermiso = esAdmin || (loggedInUser as any).permisos?.includes('EquipoUsuarios') || (loggedInUser as any).permisos?.includes('Equipo') || (loggedInUser as any).modulos?.includes('EquipoUsuarios') || (loggedInUser as any).modulos?.includes('Equipo');
   if (!tienePermiso) {
     return { error: 'No tienes permisos para registrar miembros del equipo.' };
   }
@@ -79,8 +77,8 @@ export async function crearMiembro(formData: FormData) {
       return { error: 'Se creó el miembro del equipo y su rol, pero faltan datos para crear su cuenta de usuario (Usuario y Contraseña).' };
     }
 
-    // Hashear la contraseña ingresada
-    const passwordHash = hashPassword(password);
+    // Hashear la contraseña ingresada con Bcrypt
+    const passwordHash = await hashPassword(password);
 
     // Registrar credenciales
     const { error: errUsuario } = await supabase
@@ -109,7 +107,9 @@ export async function editarMiembro(idMiembro: number, formData: FormData) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tienePermiso = (loggedInUser as any).permisos?.includes('EquipoUsuarios') || loggedInUser.usuario === 'admin';
+  const esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tienePermiso = esAdmin || (loggedInUser as any).permisos?.includes('EquipoUsuarios') || (loggedInUser as any).permisos?.includes('Equipo') || (loggedInUser as any).modulos?.includes('EquipoUsuarios') || (loggedInUser as any).modulos?.includes('Equipo');
   if (!tienePermiso) {
     return { error: 'No tienes permisos para editar miembros del equipo.' };
   }
@@ -182,7 +182,7 @@ export async function editarMiembro(idMiembro: number, formData: FormData) {
     const updateData: Partial<UsuarioSistema> = {};
     if (usuario) updateData.usuario = usuario;
     if (usuarioEstado) updateData.estado = usuarioEstado;
-    if (password) updateData.password_hash = hashPassword(password);
+    if (password) updateData.password_hash = await hashPassword(password);
     updateData.fecha_actualizacion = new Date().toISOString();
 
     const { error: errUpdateUser } = await supabase
@@ -200,7 +200,7 @@ export async function editarMiembro(idMiembro: number, formData: FormData) {
       return { error: 'Se actualizó el miembro, pero faltan datos para crear su cuenta de usuario (Usuario y Contraseña).' };
     }
 
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const { error: errUsuario } = await supabase
       .from('usuarios_sistema')
       .insert({
@@ -253,7 +253,9 @@ export async function eliminarMiembro(idMiembro: number) {
 
   // Verificar que el usuario tenga el permiso EquipoUsuarios
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tienePermisoEliminar = (loggedInUser as any).permisos?.includes('EquipoUsuarios') || loggedInUser.usuario === 'admin';
+  const esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tienePermisoEliminar = esAdmin || (loggedInUser as any).permisos?.includes('EquipoUsuarios') || (loggedInUser as any).permisos?.includes('Equipo') || (loggedInUser as any).modulos?.includes('EquipoUsuarios') || (loggedInUser as any).modulos?.includes('Equipo');
   if (!tienePermisoEliminar) {
     return { error: 'No tienes permisos para eliminar miembros del equipo.' };
   }
@@ -341,7 +343,8 @@ export async function validarPasswordUsuario(idUsuario: number, passwordIngresad
   const supabase = await createClient();
 
   // Verificar si es administrador
-  let esAdmin = loggedInUser.usuario === 'admin';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
   if (!esAdmin && loggedInUser.id_miembro) {
     const { data: userRoles } = await supabase
       .from('equipo_roles')
@@ -350,7 +353,7 @@ export async function validarPasswordUsuario(idUsuario: number, passwordIngresad
     
     esAdmin = userRoles?.some((r: { roles: { nombre: string } | { nombre: string }[] | null }) => {
       const rObj = Array.isArray(r.roles) ? r.roles[0] : r.roles;
-      return rObj?.nombre === 'Administrador';
+      return rObj?.nombre === 'Administrador' || rObj?.nombre === 'Super Admin';
     }) ?? false;
   }
 
@@ -369,8 +372,12 @@ export async function validarPasswordUsuario(idUsuario: number, passwordIngresad
     return { error: 'No se pudo encontrar el usuario.' };
   }
 
-  const hashIngresado = hashPassword(passwordIngresada);
-  if (hashIngresado === usuario.password_hash) {
+  const verification = await verifyPassword(passwordIngresada, usuario.password_hash);
+  if (verification.isValid) {
+    if (verification.needsRehash) {
+      const newHash = await hashPassword(passwordIngresada);
+      await supabase.from('usuarios_sistema').update({ password_hash: newHash }).eq('id_usuario', idUsuario);
+    }
     return { success: true };
   } else {
     return { error: 'La contraseña ingresada no es correcta.' };
@@ -386,7 +393,8 @@ export async function actualizarPasswordUsuario(idUsuario: number, nuevaPassword
   const supabase = await createClient();
 
   // Verificar si es administrador
-  let esAdmin = loggedInUser.usuario === 'admin';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
   if (!esAdmin && loggedInUser.id_miembro) {
     const { data: userRoles } = await supabase
       .from('equipo_roles')
@@ -395,7 +403,7 @@ export async function actualizarPasswordUsuario(idUsuario: number, nuevaPassword
     
     esAdmin = userRoles?.some((r: { roles: { nombre: string } | { nombre: string }[] | null }) => {
       const rObj = Array.isArray(r.roles) ? r.roles[0] : r.roles;
-      return rObj?.nombre === 'Administrador';
+      return rObj?.nombre === 'Administrador' || rObj?.nombre === 'Super Admin';
     }) ?? false;
   }
 
@@ -403,7 +411,7 @@ export async function actualizarPasswordUsuario(idUsuario: number, nuevaPassword
     return { error: 'No autorizado. Solo el Administrador puede cambiar contraseñas.' };
   }
 
-  const passwordHash = hashPassword(nuevaPassword);
+  const passwordHash = await hashPassword(nuevaPassword);
   const { error } = await supabase
     .from('usuarios_sistema')
     .update({

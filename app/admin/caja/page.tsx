@@ -12,7 +12,8 @@ export default async function CajaPage() {
   }
 
   // Verificar acceso a Caja
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Caja');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Caja') || user.permisos?.includes('Caja');
   if (!tieneAcceso) {
     redirect('/admin');
   }
@@ -29,10 +30,6 @@ export default async function CajaPage() {
   if (cajaActiva) {
     movimientos = await obtenerMovimientosCaja(cajaActiva.id_caja);
   }
-
-  const esAdmin = user.usuario === 'admin' 
-    || user.roles?.includes('Super Admin') 
-    || user.roles?.includes('Administrador');
 
   return (
     <CajaClient

@@ -6,14 +6,21 @@ import { redirect } from 'next/navigation';
 
 export default async function EquipoPage() {
   const user = await getSesionActual();
-  if (!user || (user.usuario !== 'admin' && !user.modulos?.includes('EquipoUsuarios'))) {
+  if (!user) {
+    redirect('/login');
+  }
+
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tienePermiso = user.modulos?.includes('EquipoUsuarios') || user.modulos?.includes('Equipo') || user.permisos?.includes('EquipoUsuarios') || user.permisos?.includes('Equipo');
+
+  if (!esAdmin && !tienePermiso) {
     redirect('/admin');
   }
 
   const supabase = await createClient();
 
   // 0. Determinar si el usuario actual es Administrador
-  let userIsAdmin = user.usuario === 'admin';
+  let userIsAdmin = esAdmin;
   if (!userIsAdmin && user.id_miembro) {
     const { data: userRoles } = await supabase
       .from('equipo_roles')
@@ -22,7 +29,7 @@ export default async function EquipoPage() {
     
     userIsAdmin = userRoles?.some(r => {
       const rObj = Array.isArray(r.roles) ? r.roles[0] : r.roles;
-      return rObj?.nombre === 'Administrador';
+      return rObj?.nombre === 'Administrador' || rObj?.nombre === 'Super Admin';
     }) ?? false;
   }
 
@@ -41,19 +48,24 @@ export default async function EquipoPage() {
       .eq('estado', 'ABIERTA')
   ]);
 
-  // Filtrar para que nadie pueda ver al Administrador excepto él mismo
+  // Filtrar: Los administradores ven a todo el equipo.
+  // Los usuarios con permisos limitados solo ven miembros no-administradores o a sí mismos.
   const filteredMiembros = (miembros || []).filter(miembro => {
+    if (userIsAdmin) {
+      return true;
+    }
+
     const esMiembroAdmin = miembro.usuarios_sistema?.usuario === 'admin' || miembro.equipo_roles?.some((r: { roles: { nombre: string } | { nombre: string }[] | null }) => {
       const rObj = Array.isArray(r.roles) ? r.roles[0] : r.roles;
-      return rObj?.nombre === 'Administrador';
+      return rObj?.nombre === 'Administrador' || rObj?.nombre === 'Super Admin';
     });
 
     if (!esMiembroAdmin) {
-      return true; // No es admin, visible para todos los que tienen acceso al módulo
+      return true; // No es admin, visible para colaboradores con permiso
     }
 
-    // Si es administrador, solo puede verlo el mismo usuario logueado
-    const esElMismoUsuarioLogueado = user.id_miembro === miembro.id_miembro || (user.usuario === 'admin' && miembro.usuarios_sistema?.usuario === 'admin');
+    // Si es administrador, un usuario no-admin solo puede verse a sí mismo si fuera el caso
+    const esElMismoUsuarioLogueado = user.id_miembro === miembro.id_miembro;
     return esElMismoUsuarioLogueado;
   });
 

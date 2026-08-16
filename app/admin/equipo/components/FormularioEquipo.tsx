@@ -165,7 +165,20 @@ export default function FormularioEquipo({ isOpen, onClose, roles, memberToEdit 
 
     // Validación de DNI
     if (dni && dni.length !== 8) {
-      setError('El DNI debe tener exactamente 8 dígitos.');
+      setError('El DNI debe tener exactamente 8 dígitos numéricos.');
+      return;
+    }
+
+    // Validación de Email
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Por favor ingrese un correo electrónico válido.');
+      return;
+    }
+
+    // Validación de Teléfono
+    if (telefono.trim() && (telefono.trim().length !== 9 || !/^\d{9}$/.test(telefono.trim()))) {
+      setError('El teléfono debe tener exactamente 9 dígitos numéricos.');
       return;
     }
 
@@ -318,8 +331,9 @@ export default function FormularioEquipo({ isOpen, onClose, roles, memberToEdit 
                   name="telefono" 
                   id="telefono" 
                   value={telefono}
-                  onChange={(e) => setTelefono(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 text-xs rounded-xl px-3.5 py-2.5 shadow-2xs focus:outline-none transition-all focus:border-slate-900 dark:focus:border-white focus:ring-0 placeholder:text-slate-400 dark:placeholder:text-zinc-600" 
+                  maxLength={9}
+                  onChange={(e) => setTelefono(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                  className="w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 text-xs rounded-xl px-3.5 py-2.5 shadow-2xs focus:outline-none transition-all focus:border-slate-900 dark:focus:border-white focus:ring-0 placeholder:text-slate-400 dark:placeholder:text-zinc-600 font-mono" 
                   placeholder="Ej. 999888777" 
                 />
               </div>

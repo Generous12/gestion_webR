@@ -10,7 +10,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Monto inválido.' }, { status: 400 });
     }
 
-    const res = await crearPaymentIntent(monto);
+    const res = await crearPaymentIntent({
+      monto,
+      nombrePlan: body.nombrePlan,
+      clienteDni: body.clienteDni,
+      clienteEmail: body.clienteEmail
+    });
     
     if (res.error) {
       return NextResponse.json({ error: res.error }, { status: 400 });

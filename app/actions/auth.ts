@@ -1,14 +1,11 @@
 'use server';
 
+import { cache } from 'react';
 import { createClient } from '@/utils/supabase/server';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import crypto from 'crypto';
-
-// Función helper para hashear contraseñas (SHA-256)
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
+import { checkRateLimit, getClientIp, sanitizeText, hashPassword, verifyPassword } from '@/utils/security';
 
 // Inicializar un usuario administrador por defecto si la tabla está vacía
 async function seedDefaultUser() {
@@ -56,13 +53,14 @@ async function seedDefaultUser() {
     if (errorRol) {
       console.error('Error al asignar rol de administrador:', errorRol);
     }
-    // 3. Crear credenciales de usuario
+    // 3. Crear credenciales de usuario con Bcrypt
+    const adminPasswordHash = await hashPassword('admin');
     const { error: errorUsuario } = await supabase
       .from('usuarios_sistema')
       .insert({
         id_miembro: miembro.id_miembro,
         usuario: 'admin',
-        password_hash: hashPassword('admin'), // Contraseña: admin
+        password_hash: adminPasswordHash, // Contraseña: admin
         estado: 'ACTIVO'
       });
 
@@ -75,24 +73,42 @@ async function seedDefaultUser() {
 }
 
 export async function loginUsuario(prevState: unknown, formData: FormData) {
-  // Aseguramos que exista al menos el admin por defecto
-  await seedDefaultUser();
+  const ip = await getClientIp();
 
-  const usuarioInput = formData.get('usuario') as string;
+  // Rate Limiting: Máximo 10 intentos por cada 5 minutos por IP
+  const rateLimit = checkRateLimit(`login_attempt_${ip}`, 10, 300);
+  if (!rateLimit.success) {
+    return { error: rateLimit.error };
+  }
+
+  const rawUsuario = formData.get('usuario') as string;
   const passwordInput = formData.get('password') as string;
 
-  if (!usuarioInput || !passwordInput) {
+  if (!rawUsuario || !passwordInput) {
     return { error: 'Por favor, ingresa tu usuario y contraseña.' };
   }
+
+  const usuarioInput = sanitizeText(rawUsuario, 50);
 
   const supabase = await createClient();
 
   // Buscar usuario
-  const { data: user, error } = await supabase
+  let { data: user, error } = await supabase
     .from('usuarios_sistema')
     .select('*, equipo(*)')
     .eq('usuario', usuarioInput)
-    .single();
+    .maybeSingle();
+
+  // Si no se encuentra y el usuario intenta entrar con admin, sembramos si la BD está vacía
+  if (!user && usuarioInput === 'admin') {
+    await seedDefaultUser();
+    const { data: adminUser } = await supabase
+      .from('usuarios_sistema')
+      .select('*, equipo(*)')
+      .eq('usuario', 'admin')
+      .maybeSingle();
+    user = adminUser;
+  }
 
   if (error || !user) {
     return { error: 'Usuario o contraseña incorrectos.' };
@@ -102,17 +118,31 @@ export async function loginUsuario(prevState: unknown, formData: FormData) {
     return { error: 'Tu usuario está bloqueado o inactivo.' };
   }
 
-  // Verificar contraseña
-  const hashedInput = hashPassword(passwordInput);
-  if (user.password_hash !== hashedInput) {
+  // Verificar contraseña (soporta Bcrypt y auto-migra hashes legados SHA-256)
+  const verification = await verifyPassword(passwordInput, user.password_hash);
+  if (!verification.isValid) {
     // Registrar log fallido
     await supabase.from('logs_seguridad').insert({
       id_usuario: user.id_usuario,
       accion: 'LOGIN_FALLIDO',
-      detalle: `Intento de acceso fallido para el usuario: ${usuarioInput}`
+      detalle: `Intento de acceso fallido para el usuario: ${usuarioInput}, IP: ${ip}`
     });
 
     return { error: 'Usuario o contraseña incorrectos.' };
+  }
+
+  // Si el usuario tenía un hash legado SHA-256, actualizar automáticamente a Bcrypt en la BD
+  if (verification.needsRehash) {
+    try {
+      const newBcryptHash = await hashPassword(passwordInput);
+      await supabase
+        .from('usuarios_sistema')
+        .update({ password_hash: newBcryptHash })
+        .eq('id_usuario', user.id_usuario);
+      console.log(`Hash de usuario ${user.usuario} actualizado transparentemente a Bcrypt.`);
+    } catch (rehashErr) {
+      console.error('Error al auto-actualizar hash a Bcrypt:', rehashErr);
+    }
   }
 
   // Crear sesión
@@ -173,7 +203,7 @@ export async function logoutUsuario() {
   redirect('/login');
 }
 
-export async function getSesionActual() {
+export const getSesionActual = cache(async () => {
   const cookieStore = await cookies();
   const token = cookieStore.get('session_token')?.value;
 
@@ -193,11 +223,16 @@ export async function getSesionActual() {
     return null;
   }
 
-  // Actualizar último ping para mantener viva la sesión
-  await supabase
-    .from('sesiones_usuario')
-    .update({ ultimo_ping: new Date().toISOString() })
-    .eq('id_sesion', sesion.id_sesion);
+  // Actualizar último ping solo si han pasado más de 10 minutos (ahorra escrituras a la BD en cada página)
+  const ahora = Date.now();
+  const ultimoPing = sesion.ultimo_ping ? new Date(sesion.ultimo_ping).getTime() : 0;
+  if (ahora - ultimoPing > 10 * 60 * 1000) {
+    supabase
+      .from('sesiones_usuario')
+      .update({ ultimo_ping: new Date(ahora).toISOString() })
+      .eq('id_sesion', sesion.id_sesion)
+      .then();
+  }
 
   // Obtener permisos y módulos del usuario de acuerdo a sus roles
   const idMiembro = sesion.usuarios_sistema.id_miembro;
@@ -205,8 +240,43 @@ export async function getSesionActual() {
   const modulos = new Set<string>();
   const roles: string[] = [];
 
+  const ALL_ADMIN_MODULES = [
+    'Dashboard',
+    'Caja',
+    'Ventas',
+    'HistorialVentas',
+    'Inventario',
+    'Recepcion',
+    'CRM',
+    'Planes',
+    'Finanzas',
+    'Equipo',
+    'EquipoUsuarios',
+    'Roles',
+    'RolesPermisos',
+    'Logs',
+    'LogsSeguridad'
+  ];
+
+  const ALL_ADMIN_PERMISSIONS = [
+    'DashboardVer', 'Dashboard',
+    'CajaAperturaCierre', 'CajaMovimientos', 'Caja',
+    'VentasRegistrar', 'Ventas',
+    'HistorialVentasVer', 'HistorialVentas',
+    'InventarioVer', 'InventarioModificar', 'Inventario',
+    'RecepcionAcceso', 'RecepcionRegistrar', 'Recepcion',
+    'CrmVer', 'CRM',
+    'PlanesGestionar', 'Planes',
+    'FinanzasVer', 'Finanzas',
+    'EquipoUsuarios', 'Equipo',
+    'RolesPermisos', 'Roles',
+    'LogsSeguridad', 'Logs'
+  ];
+
   if (sesion.usuarios_sistema.usuario === 'admin') {
-    roles.push('Super Admin');
+    roles.push('Super Admin', 'Administrador');
+    ALL_ADMIN_MODULES.forEach(m => modulos.add(m));
+    permisos.push(...ALL_ADMIN_PERMISSIONS);
   }
 
   if (idMiembro) {
@@ -224,20 +294,11 @@ export async function getSesionActual() {
 
     roles.push(...rolesNombres);
 
-    const esAdministrador = rolesNombres.includes('Administrador') || sesion.usuarios_sistema.usuario === 'admin';
+    const esAdministrador = rolesNombres.includes('Administrador') || rolesNombres.includes('Super Admin') || rolesNombres.includes('Admin') || sesion.usuarios_sistema.usuario === 'admin';
 
     if (esAdministrador) {
-      // El administrador tiene acceso a todos los permisos y módulos registrados en el sistema
-      const { data: todosPermisos } = await supabase
-        .from('permisos')
-        .select('codigo, modulo');
-
-      if (todosPermisos) {
-        for (const p of todosPermisos) {
-          if (p.codigo) permisos.push(p.codigo);
-          if (p.modulo) modulos.add(p.modulo);
-        }
-      }
+      ALL_ADMIN_MODULES.forEach(m => modulos.add(m));
+      permisos.push(...ALL_ADMIN_PERMISSIONS);
     } else if (rolIds.length > 0) {
       // 2. Obtener los permisos asociados a estos roles para otros usuarios
       const { data: rpData } = await supabase
@@ -266,4 +327,4 @@ export async function getSesionActual() {
     modulos: Array.from(modulos),
     roles
   };
-}
+});

@@ -61,6 +61,12 @@ export default function RecepcionClient({ user, cajaActiva }: RecepcionClientPro
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
+  // Estado para garantizar montaje limpio del lado cliente (evita hydration errors de extensiones del navegador)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Cargar lista inicial de clientes y foco automático en buscador
@@ -81,6 +87,17 @@ export default function RecepcionClient({ user, cajaActiva }: RecepcionClientPro
     };
     loadInitialClientes();
   }, []);
+
+  // Skeleton de carga seguro para hidratación perfecta
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-14 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+      </div>
+    );
+  }
 
   // Buscar clientes en BD
   const handleSearch = async (val: string) => {
@@ -200,7 +217,7 @@ export default function RecepcionClient({ user, cajaActiva }: RecepcionClientPro
   };
 
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-zinc-700/10 blur-3xl"></div>

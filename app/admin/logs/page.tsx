@@ -11,7 +11,14 @@ export default async function LogsSeguridadPage({
   searchParams: Promise<{ q?: string; date?: string }>;
 }) {
   const user = await getSesionActual();
-  if (!user || (user.usuario !== 'admin' && !user.modulos?.includes('LogsSeguridad'))) {
+  if (!user) {
+    redirect('/login');
+  }
+
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tienePermiso = user.modulos?.includes('LogsSeguridad') || user.modulos?.includes('Logs') || user.permisos?.includes('LogsSeguridad') || user.permisos?.includes('Logs');
+
+  if (!esAdmin && !tienePermiso) {
     redirect('/admin');
   }
 
@@ -43,7 +50,7 @@ export default async function LogsSeguridadPage({
   const { data: logs } = await query;
 
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-6 shadow-md border border-slate-800 sm:p-8">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl"></div>

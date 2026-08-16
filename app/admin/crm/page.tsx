@@ -1,7 +1,7 @@
 import React from 'react';
 import { getSesionActual } from '@/app/actions/auth';
 import { redirect } from 'next/navigation';
-import { obtenerClientesPorVencer } from '@/app/actions/crm';
+import { obtenerClientesPorVencer, obtenerContactosWeb } from '@/app/actions/crm';
 import CrmClient from './components/CrmClient';
 
 export default async function CrmPage() {
@@ -11,15 +11,22 @@ export default async function CrmPage() {
   }
 
   // Verificar acceso a CRM
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('CRM');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('CRM') || user.permisos?.includes('CRM');
   if (!tieneAcceso) {
     redirect('/admin');
   }
 
-  // Obtener membresías vencidas y por vencer en los próximos 15 días
-  const membresias = await obtenerClientesPorVencer(15);
+  // Obtener en paralelo membresías vencidas/por vencer y prospectos web
+  const [membresias, contactosWeb] = await Promise.all([
+    obtenerClientesPorVencer(15),
+    obtenerContactosWeb()
+  ]);
 
   return (
-    <CrmClient membresias={membresias} />
+    <CrmClient
+      membresias={membresias}
+      initialContactosWeb={contactosWeb}
+    />
   );
 }

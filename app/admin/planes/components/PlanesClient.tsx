@@ -97,13 +97,17 @@ export default function PlanesClient({ initialPlanes }: PlanesClientProps) {
 
       if (!response.ok) {
         setFormError(result.error || 'Ocurrió un error al procesar el plan.');
+        showToast(result.error || 'Error al guardar el plan de membresía', 'danger');
       } else {
+        const toastMsg = isEditing ? 'Plan de membresía actualizado con éxito' : 'Plan de membresía guardado con éxito';
         setFormSuccess(isEditing ? 'Plan de membresía actualizado con éxito.' : 'Plan de membresía creado y guardado con éxito.');
+        showToast(toastMsg, 'success');
         handleClearForm();
         router.refresh();
       }
     } catch (err) {
       setFormError('Error de red al intentar conectar con el servidor.');
+      showToast('Error de red al conectar con el servidor', 'danger');
       console.error(err);
     } finally {
       setLoading(false);
@@ -159,8 +163,56 @@ export default function PlanesClient({ initialPlanes }: PlanesClientProps) {
     }
   };
 
+  // Cambiar estado Activa / Inactiva con un clic
+  const handleTogglePlanStatus = async (plan: TipoMembresia) => {
+    const nuevoEstado = plan.estado === 'ACTIVA' ? 'INACTIVA' : 'ACTIVA';
+    setLoading(true);
+    try {
+      const response = await fetch('/api/membresias/tipos', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_tipo: plan.id_tipo,
+          nombre: plan.nombre,
+          precio: plan.precio,
+          duracion_dias: plan.duracion_dias,
+          descripcion: plan.descripcion,
+          estado: nuevoEstado
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        showToast(result.error || 'Error al cambiar estado', 'danger');
+      } else {
+        showToast(`Membresía ${nuevoEstado === 'ACTIVA' ? 'Activada (Visible en la web)' : 'Desactivada (Oculta de la web)'}.`, 'success');
+        router.refresh();
+      }
+    } catch {
+      showToast('Error de red al actualizar membresía', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [mounted, setMounted] = useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div suppressHydrationWarning className="h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+          <div suppressHydrationWarning className="lg:col-span-2 h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-zinc-700/10 blur-3xl"></div>
@@ -330,13 +382,17 @@ export default function PlanesClient({ initialPlanes }: PlanesClientProps) {
                           {plan.duracion_dias} días
                         </td>
                         <td className="p-4 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-md font-bold text-[10px] uppercase ${
-                            plan.estado === 'ACTIVA'
-                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                              : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
-                          }`}>
-                            {plan.estado}
-                          </span>
+                          <button
+                            onClick={() => handleTogglePlanStatus(plan)}
+                            title="Haz clic para cambiar visibilidad en la web (/unete)"
+                            className={`inline-block px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase transition-colors cursor-pointer border ${
+                              plan.estado === 'ACTIVA'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                                : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+                            }`}
+                          >
+                            {plan.estado === 'ACTIVA' ? 'Visible Web' : 'Oculto Web'}
+                          </button>
                         </td>
                         <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-3">

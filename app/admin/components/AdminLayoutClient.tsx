@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { logoutUsuario, getSesionActual } from '@/app/actions/auth';
@@ -39,6 +39,35 @@ interface NavCategory {
   items: NavItem[];
 }
 
+function subscribeTheme(callback: () => void) {
+  window.addEventListener('storage', callback);
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.attributeName === 'class') {
+        callback();
+      }
+    }
+  });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  return () => {
+    window.removeEventListener('storage', callback);
+    observer.disconnect();
+  };
+}
+
+function getThemeSnapshot() {
+  return document.documentElement.classList.contains('dark');
+}
+
+function getThemeServerSnapshot() {
+  return true;
+}
+
+const emptySubscribe = () => () => {};
+
 export default function AdminLayoutClient({ children, user, cajaActiva }: AdminLayoutClientProps) {
   const pathname = usePathname();
   const [prevPathname, setPrevPathname] = useState<string>(pathname);
@@ -53,20 +82,27 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
     setIsNavigating(false);
   }
 
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-    }
-    return 'light';
-  });
+  const isMounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+
+  const isDark = useSyncExternalStore(
+    subscribeTheme,
+    getThemeSnapshot,
+    getThemeServerSnapshot
+  );
 
   const toggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     const isDarkBefore = document.documentElement.classList.contains('dark');
 
     const changeTheme = () => {
-      const isDark = document.documentElement.classList.toggle('dark');
-      localStorage.setItem('theme', isDark ? 'dark' : 'light');
-      setTheme(isDark ? 'dark' : 'light');
+      const isDarkNow = document.documentElement.classList.toggle('dark');
+      try {
+        localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+        localStorage.setItem('gym_theme', isDarkNow ? 'dark' : 'light');
+      } catch {}
     };
 
     if (!document.startViewTransition) {
@@ -149,7 +185,7 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
           href: '/admin/caja',
           modulo: 'Caja',
           roleBadge: 'Turno / Fondos',
-          badge: cajaActiva ? '🟢 Abierta' : '🔴 Cerrada',
+          badge: cajaActiva ? 'Abierta' : 'Cerrada',
           badgeType: cajaActiva ? 'success' : 'danger',
           icon: (
             <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -321,8 +357,7 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
   const userRole = user.roles && user.roles.length > 0 ? user.roles.join(', ') : 'Usuario';
 
   return (
-    <ModalAlertProvider>
-      <div className="min-h-screen bg-zinc-50/50 dark:bg-zinc-950/20 flex">
+    <div suppressHydrationWarning className="min-h-screen bg-zinc-50/50 dark:bg-zinc-950/20 flex">
         {/* Sidebar - Desktop */}
         <div className="hidden md:flex w-68 flex-col fixed inset-y-0 z-50 bg-white dark:bg-zinc-950 border-r border-zinc-200/70 dark:border-zinc-900 shadow-xs">
           <div className="flex h-16 shrink-0 items-center justify-between px-5 border-b border-zinc-200/50 dark:border-zinc-900">
@@ -377,17 +412,16 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
                             </div>
                             {item.badge && (
                               <span
-                                className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md tracking-tight shrink-0 ${
-                                  isActive
+                                className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md tracking-tight shrink-0 ${isActive
                                     ? 'bg-white/20 text-white'
                                     : item.badgeType === 'success'
-                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                    : item.badgeType === 'danger'
-                                    ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                                    : item.badgeType === 'warning'
-                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                    : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
-                                }`}
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      : item.badgeType === 'danger'
+                                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                                        : item.badgeType === 'warning'
+                                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                          : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                                  }`}
                               >
                                 {item.badge}
                               </span>
@@ -481,11 +515,13 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
 
               <button
                 onClick={toggleTheme}
-                className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-850 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
                 aria-label="Cambiar modo oscuro / claro"
                 title="Cambiar tema"
               >
-                {theme === 'dark' ? (
+                {!isMounted ? (
+                  <span className="w-4 h-4 block" />
+                ) : isDark ? (
                   <svg className="w-4 h-4 text-amber-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707m12.728 12.728A9 9 0 115.636 5.636a9 9 0 0112.728 12.728z" />
                   </svg>
@@ -583,6 +619,5 @@ export default function AdminLayoutClient({ children, user, cajaActiva }: AdminL
           </main>
         </div>
       </div>
-    </ModalAlertProvider>
   );
 }

@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { getSesionActual } from '@/app/actions/auth';
 import { Cliente } from '@/types/gym.types';
+import { sanitizePostgrestParam } from '@/utils/security';
 
 // Buscar clientes por DNI, Nombre o Apellido (o lista por defecto)
 export async function buscarClientes(query: string) {
@@ -28,7 +29,10 @@ export async function buscarClientes(query: string) {
     return data as Cliente[];
   }
 
-  const cleanQuery = query.trim();
+  const cleanQuery = sanitizePostgrestParam(query.trim());
+  if (!cleanQuery) {
+    return [];
+  }
 
   // Búsqueda por DNI exacto o Nombre/Apellido parcial
   const { data, error } = await supabase

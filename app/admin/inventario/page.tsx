@@ -11,7 +11,8 @@ export default async function InventarioPage() {
   }
 
   // Verificar permisos: Administrador o rol con acceso a Inventario
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Inventario') || user.modulos?.includes('Planes'); // Permitir Planes como fallback temporal
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Inventario') || user.modulos?.includes('Planes') || user.permisos?.includes('Inventario') || user.permisos?.includes('Planes');
   if (!tieneAcceso) {
     redirect('/admin');
   }

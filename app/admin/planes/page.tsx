@@ -12,7 +12,8 @@ export default async function PlanesPage() {
   }
 
   // Verificar acceso a Planes
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Planes') || user.modulos?.includes('Finanzas');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Planes') || user.modulos?.includes('Finanzas') || user.permisos?.includes('Planes') || user.permisos?.includes('Finanzas');
   if (!tieneAcceso) {
     redirect('/admin');
   }

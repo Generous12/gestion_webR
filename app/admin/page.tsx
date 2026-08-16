@@ -74,7 +74,8 @@ export default async function AdminDashboardPage() {
     redirect('/login');
   }
 
-  if (user.usuario !== 'admin' && !user.modulos?.includes('Dashboard')) {
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.modulos?.includes('Dashboard');
+  if (!esAdmin) {
     if (user.modulos?.includes('Recepcion')) {
       redirect('/admin/recepcion');
     } else if (user.modulos?.includes('Ventas')) {
@@ -87,11 +88,11 @@ export default async function AdminDashboardPage() {
       redirect('/admin/finanzas');
     } else if (user.modulos?.includes('Planes')) {
       redirect('/admin/planes');
-    } else if (user.modulos?.includes('EquipoUsuarios')) {
+    } else if (user.modulos?.includes('EquipoUsuarios') || user.modulos?.includes('Equipo')) {
       redirect('/admin/equipo');
-    } else if (user.modulos?.includes('RolesPermisos')) {
+    } else if (user.modulos?.includes('RolesPermisos') || user.modulos?.includes('Roles')) {
       redirect('/admin/roles');
-    } else if (user.modulos?.includes('LogsSeguridad')) {
+    } else if (user.modulos?.includes('LogsSeguridad') || user.modulos?.includes('Logs')) {
       redirect('/admin/logs');
     } else if (user.modulos?.includes('Inventario')) {
       redirect('/admin/inventario');
@@ -172,10 +173,15 @@ export default async function AdminDashboardPage() {
     .filter(m => m.tipo === 'INGRESO')
     .reduce((sum, m) => sum + Number(m.monto || 0), 0);
 
-  const totalEgresos = movimientos
+  const egresosCaja = movimientos
     .filter(m => m.tipo === 'EGRESO')
     .reduce((sum, m) => sum + Number(m.monto || 0), 0);
 
+  const totalGastosPagados = gastosData
+    .filter(g => g.estado === 'PAGADO')
+    .reduce((sum, g) => sum + Number(g.monto_final !== null && g.monto_final !== undefined ? g.monto_final : g.monto_estimado || 0), 0);
+
+  const totalEgresos = egresosCaja + totalGastosPagados;
   const balanceNeto = totalIngresos - totalEgresos;
   const margenUtilidad = totalIngresos > 0 ? (balanceNeto / totalIngresos) * 100 : 0;
 
@@ -273,9 +279,9 @@ export default async function AdminDashboardPage() {
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
     },
     {
-      name: 'Gastos y Salidas',
+      name: 'Gastos y Salidas Totales',
       value: `S/ ${totalEgresos.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      subtitle: `${gastosData.length} gastos contabilizados`,
+      subtitle: `S/ ${totalGastosPagados.toLocaleString('es-PE', { minimumFractionDigits: 2 })} en gastos pagados + S/ ${egresosCaja.toLocaleString('es-PE', { minimumFractionDigits: 2 })} caja`,
       icon: (
         <svg className="w-5 h-5 text-rose-600 dark:text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -478,9 +484,9 @@ export default async function AdminDashboardPage() {
             </p>
             <p className="text-[11px] text-zinc-500 mt-0.5">
               {productosBajoStock.length > 0 ? (
-                <span className="text-rose-600 dark:text-rose-400 font-medium">⚠️ {productosBajoStock.length} productos con bajo stock</span>
+                <span className="text-rose-600 dark:text-rose-400 font-medium">Aviso: {productosBajoStock.length} productos con bajo stock</span>
               ) : (
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium">✓ Stock en niveles óptimos</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">Stock en niveles óptimos</span>
               )}
             </p>
           </div>

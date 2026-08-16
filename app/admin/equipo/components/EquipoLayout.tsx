@@ -163,8 +163,23 @@ export default function EquipoLayout({ initialMembers, roles, isAdmin, cajasAbie
     }
   };
 
+  const [mounted, setMounted] = useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-14 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Formulario Modal (Sirve para Crear y Editar) */}
       <FormularioEquipo
         isOpen={isFormOpen || !!memberToEdit}

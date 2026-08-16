@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 import { ModalAlertProvider } from "@/context/ModalAlertContext";
@@ -12,6 +12,16 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "GestionWeb - Gym Management OS",
   description: "Sistema integral de gestión de gimnasios y centros deportivos",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" }
+  ]
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -37,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body suppressHydrationWarning className="min-h-full flex flex-col">
+      <body suppressHydrationWarning className="min-h-full flex flex-col antialiased">
         <ModalAlertProvider>
           {children}
         </ModalAlertProvider>

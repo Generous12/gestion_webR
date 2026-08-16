@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { abrirCaja, cerrarCaja, reabrirCaja, registrarMovimientoManual } from '@/app/actions/caja';
+import { abrirCaja, cerrarCaja, reabrirCaja, registrarMovimientoManual, obtenerMovimientosCaja } from '@/app/actions/caja';
 import { Caja, MovimientoCaja } from '@/types/gym.types';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -39,6 +39,11 @@ export default function CajaClient({
   const [isCierreModalOpen, setIsCierreModalOpen] = useState(false);
   const [cajaACerrar, setCajaACerrar] = useState<Caja | null>(null);
 
+  // Modal para ver detalle de movimientos de cualquier caja del historial
+  const [detalleCajaModal, setDetalleCajaModal] = useState<Caja | null>(null);
+  const [detalleMovimientos, setDetalleMovimientos] = useState<MovimientoCaja[]>([]);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
+
   // Estados formularios
   const [montoInicial, setMontoInicial] = useState('50.00');
   const [montoFinal, setMontoFinal] = useState('');
@@ -57,7 +62,7 @@ export default function CajaClient({
   const [selectedCajaId, setSelectedCajaId] = useState<number | null>(null);
 
   // La caja a mostrar: si el admin eligió una específica de cajasAbiertas, o cajaActiva, o la primera abierta
-  const cajaAMostrar = (esAdmin && selectedCajaId ? cajasAbiertas.find((c) => c.id_caja === selectedCajaId) : null) || cajaActiva || (esAdmin && cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
+  const cajaAMostrar = (esAdmin && selectedCajaId ? cajasAbiertas.find((c) => c.id_caja === selectedCajaId) : null) || cajaActiva || (cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
 
   // Verificar si existe alguna caja abierta actualmente en el sistema
   const hayCajaAbierta = Boolean(
@@ -68,7 +73,7 @@ export default function CajaClient({
 
   // Datos del responsable de la caja activa
   const esMiCaja = cajaAMostrar ? cajaAMostrar.id_usuario === currentUser?.id_usuario : false;
-  const puedeCerrarCaja = esAdmin || esMiCaja;
+  const puedeCerrarCaja = true;
   const colaborador = cajaAMostrar?.usuarios_sistema?.equipo;
   const usuarioNombre = cajaAMostrar?.usuarios_sistema?.usuario || `Usuario #${cajaAMostrar?.id_usuario || 'S/D'}`;
   const responsableNombre = colaborador?.nombre
@@ -141,13 +146,28 @@ export default function CajaClient({
     }
   };
 
+  // Ver desglose de movimientos de cualquier caja del historial
+  const handleVerDetalle = async (caja: Caja) => {
+    setDetalleCajaModal(caja);
+    setCargandoDetalle(true);
+    try {
+      const data = await obtenerMovimientosCaja(caja.id_caja);
+      setDetalleMovimientos(data);
+    } catch (err) {
+      console.error(err);
+      showToast('No se pudieron cargar los movimientos de esta caja.', 'danger');
+    } finally {
+      setCargandoDetalle(false);
+    }
+  };
+
   // Abrir modal de cierre para una caja específica
   const abrirModalCierre = (cajaTarget: Caja) => {
     setCajaACerrar(cajaTarget);
     if (cajaTarget.id_caja === cajaAMostrar?.id_caja && esCajaActualConMovimientos) {
-      setMontoFinal(saldoEsperado.toFixed(2));
+      setMontoFinal(Math.max(0, saldoEsperado).toFixed(2));
     } else {
-      setMontoFinal(Number(cajaTarget.monto_inicial || 0).toFixed(2));
+      setMontoFinal(Math.max(0, Number(cajaTarget.monto_inicial || 0)).toFixed(2));
     }
     setFormError(null);
     setIsCierreModalOpen(true);
@@ -231,7 +251,7 @@ export default function CajaClient({
   });
 
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header General */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-zinc-700/10 blur-3xl"></div>
@@ -312,7 +332,11 @@ export default function CajaClient({
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-2xl p-5 shadow-xs">
                   <div className="flex items-start justify-between gap-4 flex-col sm:flex-row">
                     <div className="flex items-start gap-3">
-                      <span className="text-2xl">⚠️</span>
+                      <div className="p-2 rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 shrink-0">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      </div>
                       <div>
                         <h3 className="font-bold text-amber-900 dark:text-amber-300 text-sm">
                           Se detectó {cajasAbiertas.length} turno(s) de caja ABIERTO(S) en el gimnasio
@@ -359,7 +383,11 @@ export default function CajaClient({
               {!esAdmin && cajasAbiertas.length > 0 ? (
                 <div className="max-w-md mx-auto">
                   <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-2xl p-6 text-center shadow-md">
-                    <span className="text-3xl block mb-2">🔒</span>
+                    <div className="h-12 w-12 rounded-2xl bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 mx-auto flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    </div>
                     <h3 className="font-bold text-amber-900 dark:text-amber-200 text-sm">
                       Caja Ocupada por Otro Colaborador
                     </h3>
@@ -433,7 +461,11 @@ export default function CajaClient({
               {esAdmin && cajasAbiertas.length > 1 && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <span className="text-xl">⚠️</span>
+                    <div className="p-2 rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 shrink-0">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
                     <div>
                       <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
                         Hay {cajasAbiertas.length} turnos de caja abiertos simultáneamente hoy
@@ -482,7 +514,9 @@ export default function CajaClient({
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3.5">
                     <div className="h-11 w-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-base shadow-sm shrink-0">
-                      💰
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -536,7 +570,11 @@ export default function CajaClient({
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Fondo Inicial</span>
                     <p className="text-xl font-bold text-zinc-850 dark:text-zinc-100">S/ {fondoInicial.toFixed(2)}</p>
                   </div>
-                  <span className="text-lg">💵</span>
+                  <div className="h-8 w-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 </div>
 
                 {/* Ingresos */}
@@ -545,7 +583,11 @@ export default function CajaClient({
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Ingresos Turno</span>
                     <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">S/ {totalIngresos.toFixed(2)}</p>
                   </div>
-                  <span className="text-lg">📈</span>
+                  <div className="h-8 w-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  </div>
                 </div>
 
                 {/* Egresos */}
@@ -554,7 +596,11 @@ export default function CajaClient({
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Egresos Turno</span>
                     <p className="text-xl font-bold text-rose-600 dark:text-rose-400">S/ {totalEgresos.toFixed(2)}</p>
                   </div>
-                  <span className="text-lg">📉</span>
+                  <div className="h-8 w-8 rounded-lg bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+                    </svg>
+                  </div>
                 </div>
 
                 {/* Saldo esperado */}
@@ -563,7 +609,11 @@ export default function CajaClient({
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Debes Tener en Cajón</span>
                     <p className="text-xl font-black text-zinc-900 dark:text-zinc-50">S/ {saldoEsperado.toFixed(2)}</p>
                   </div>
-                  <span className="text-lg">💰</span>
+                  <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
 
@@ -585,40 +635,58 @@ export default function CajaClient({
                       <thead>
                         <tr className="bg-zinc-50 dark:bg-zinc-850 text-zinc-400 font-bold border-b border-zinc-100 dark:border-zinc-800">
                           <th className="p-4 uppercase tracking-wider">Concepto</th>
-                          <th className="p-4 uppercase tracking-wider">Tipo</th>
-                          <th className="p-4 uppercase tracking-wider">Monto</th>
-                          <th className="p-4 uppercase tracking-wider">Hora</th>
+                          <th className="p-4 uppercase tracking-wider">Registrado Por</th>
+                          <th className="p-4 uppercase tracking-wider text-center">Tipo</th>
+                          <th className="p-4 uppercase tracking-wider text-right">Monto</th>
+                          <th className="p-4 uppercase tracking-wider text-right">Hora</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {movimientos.map((mov) => (
-                          <tr key={mov.id_movimiento} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20">
-                            <td className="p-4 font-semibold text-zinc-800 dark:text-zinc-200">{mov.concepto}</td>
-                            <td className="p-4">
-                              <span
-                                className={`inline-block px-2.5 py-0.5 rounded-md font-bold ${
-                                  mov.tipo === 'INGRESO'
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                                    : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                        {movimientos.map((mov) => {
+                          const cajeroName = mov.usuarios_sistema?.equipo?.nombre
+                            ? `${mov.usuarios_sistema.equipo.nombre} ${mov.usuarios_sistema.equipo.apellido || ''}`
+                            : mov.usuarios_sistema?.usuario
+                            ? `@${mov.usuarios_sistema.usuario}`
+                            : 'Sistema';
+                          return (
+                            <tr key={mov.id_movimiento} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20">
+                              <td className="p-4 font-semibold text-zinc-800 dark:text-zinc-200">{mov.concepto}</td>
+                              <td className="p-4">
+                                <span className="font-semibold text-zinc-800 dark:text-zinc-200 block text-xs">
+                                  {cajeroName}
+                                </span>
+                                {mov.usuarios_sistema?.usuario && (
+                                  <span className="text-[10px] text-zinc-400">
+                                    @{mov.usuarios_sistema.usuario}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-4 text-center">
+                                <span
+                                  className={`inline-block px-2.5 py-0.5 rounded-md font-bold text-[10px] ${
+                                    mov.tipo === 'INGRESO'
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                      : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                                  }`}
+                                >
+                                  {mov.tipo}
+                                </span>
+                              </td>
+                              <td
+                                className={`p-4 text-right font-black ${
+                                  mov.tipo === 'INGRESO' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                                 }`}
                               >
-                                {mov.tipo}
-                              </span>
-                            </td>
-                            <td
-                              className={`p-4 font-black ${
-                                mov.tipo === 'INGRESO' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                              }`}
-                            >
-                              {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
-                            </td>
-                            <td className="p-4 text-zinc-400 dark:text-zinc-500">
-                              {mov.fecha
-                                ? new Date(mov.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                                : '-'}
-                            </td>
-                          </tr>
-                        ))}
+                                {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
+                              </td>
+                              <td className="p-4 text-right text-zinc-400 dark:text-zinc-500">
+                                {mov.fecha
+                                  ? new Date(mov.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                  : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -662,8 +730,8 @@ export default function CajaClient({
                 className="bg-white dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-750 text-xs rounded-xl px-3 py-2 text-zinc-800 dark:text-zinc-100 focus:outline-none"
               >
                 <option value="TODOS">Todos los estados</option>
-                <option value="ABIERTA">🟢 ABIERTAS</option>
-                <option value="CERRADA">⚪ CERRADAS</option>
+                <option value="ABIERTA">ABIERTAS</option>
+                <option value="CERRADA">CERRADAS</option>
               </select>
             </div>
           </div>
@@ -764,18 +832,23 @@ export default function CajaClient({
                           )}
                         </td>
                         <td className="p-4 text-right">
-                          {c.estado === 'ABIERTA' ? (
+                          <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => abrirModalCierre(c)}
-                              className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                              onClick={() => handleVerDetalle(c)}
+                              className="text-[11px] font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800/60 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                              title="Ver desglose de todos los ingresos y egresos de este turno"
                             >
-                              Cerrar Turno
+                              Ver Movimientos
                             </button>
-                          ) : (
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="text-[11px] text-zinc-400 font-medium">Liquidado</span>
-                              {/* Si ya existe una caja abierta en el sistema, NO se muestra el botón de Reabrir */}
-                              {!hayCajaAbierta && c.fecha === new Date().toISOString().split('T')[0] && (esAdmin || c.id_usuario === currentUser?.id_usuario) && (
+                            {c.estado === 'ABIERTA' ? (
+                              <button
+                                onClick={() => abrirModalCierre(c)}
+                                className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                              >
+                                Cerrar Turno
+                              </button>
+                            ) : (
+                              !hayCajaAbierta && c.fecha === new Date().toISOString().split('T')[0] && (esAdmin || c.id_usuario === currentUser?.id_usuario) && (
                                 <button
                                   onClick={() => handleReabrir(c.id_caja)}
                                   disabled={loading}
@@ -784,9 +857,9 @@ export default function CajaClient({
                                 >
                                   Reabrir
                                 </button>
-                              )}
-                            </div>
-                          )}
+                              )
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -964,7 +1037,7 @@ export default function CajaClient({
 
               {montoFinal && parseFloat(montoFinal) !== saldoEsperado && (
                 <div className="p-3 bg-amber-50 text-amber-800 border border-amber-100 rounded-xl text-[10px] leading-relaxed font-semibold">
-                  ⚠️ El dinero reportado difiere del monto contable esperado (Diferencia: S/ {(parseFloat(montoFinal) - saldoEsperado).toFixed(2)}). Esto se registrará en el log de seguridad de auditoría.
+                  Aviso: El dinero reportado difiere del monto contable esperado (Diferencia: S/ {(parseFloat(montoFinal) - saldoEsperado).toFixed(2)}). Esto se registrará en el log de seguridad de auditoría.
                 </div>
               )}
 
@@ -988,6 +1061,155 @@ export default function CajaClient({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- MODAL DETALLE DE MOVIMIENTOS (CUALQUIER CAJA) ----------------- */}
+      {detalleCajaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-850 flex flex-col max-h-[85vh]">
+            <div className="px-6 py-5 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-850/40 flex justify-between items-center shrink-0">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base text-zinc-900 dark:text-zinc-50">
+                    Detalle de Movimientos • Caja ID #{detalleCajaModal.id_caja}
+                  </h3>
+                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase ${
+                    detalleCajaModal.estado === 'ABIERTA'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                      : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                  }`}>
+                    {detalleCajaModal.estado}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Fecha: <strong>{detalleCajaModal.fecha}</strong> • Responsable:{' '}
+                  <strong>
+                    {detalleCajaModal.usuarios_sistema?.equipo?.nombre
+                      ? `${detalleCajaModal.usuarios_sistema.equipo.nombre} ${detalleCajaModal.usuarios_sistema.equipo.apellido || ''}`
+                      : `@${detalleCajaModal.usuarios_sistema?.usuario || 'Sistema'}`}
+                  </strong>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setDetalleCajaModal(null);
+                  setDetalleMovimientos([]);
+                }}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Resumen del Turno */}
+            <div className="grid grid-cols-3 gap-3 p-4 bg-zinc-50/50 dark:bg-zinc-850/20 border-b border-zinc-150 dark:border-zinc-800 shrink-0 text-xs">
+              <div className="bg-white dark:bg-zinc-850 p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase">Fondo Inicial</span>
+                <p className="font-extrabold text-sm text-zinc-850 dark:text-zinc-100 mt-0.5">
+                  S/ {Number(detalleCajaModal.monto_inicial || 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="bg-white dark:bg-zinc-850 p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase">Total Ingresos</span>
+                <p className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  S/ {detalleMovimientos.filter(m => m.tipo === 'INGRESO').reduce((sum, m) => sum + Number(m.monto), 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="bg-white dark:bg-zinc-850 p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase">Total Egresos</span>
+                <p className="font-extrabold text-sm text-rose-600 dark:text-rose-400 mt-0.5">
+                  S/ {detalleMovimientos.filter(m => m.tipo === 'EGRESO').reduce((sum, m) => sum + Number(m.monto), 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            {/* Lista de Transacciones y Ajustes */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {cargandoDetalle ? (
+                <div className="p-12 text-center text-zinc-400 text-xs animate-pulse">
+                  Cargando movimientos de auditoría...
+                </div>
+              ) : detalleMovimientos.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-zinc-50 dark:bg-zinc-850 text-zinc-400 font-bold border-b border-zinc-100 dark:border-zinc-800">
+                        <th className="p-3 uppercase tracking-wider">Concepto / Glosa</th>
+                        <th className="p-3 uppercase tracking-wider">Registrado Por</th>
+                        <th className="p-3 uppercase tracking-wider text-center">Tipo</th>
+                        <th className="p-3 uppercase tracking-wider text-right">Monto</th>
+                        <th className="p-3 uppercase tracking-wider text-right">Hora</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {detalleMovimientos.map((mov) => {
+                        const cajeroName = mov.usuarios_sistema?.equipo?.nombre
+                          ? `${mov.usuarios_sistema.equipo.nombre} ${mov.usuarios_sistema.equipo.apellido || ''}`
+                          : mov.usuarios_sistema?.usuario
+                          ? `@${mov.usuarios_sistema.usuario}`
+                          : 'Sistema';
+                        return (
+                          <tr key={mov.id_movimiento} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20">
+                            <td className="p-3 font-semibold text-zinc-800 dark:text-zinc-200">
+                              {mov.concepto}
+                            </td>
+                            <td className="p-3">
+                              <span className="font-semibold text-zinc-800 dark:text-zinc-200 block text-xs">
+                                {cajeroName}
+                              </span>
+                              {mov.usuarios_sistema?.usuario && (
+                                <span className="text-[10px] text-zinc-400">
+                                  @{mov.usuarios_sistema.usuario}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                                mov.tipo === 'INGRESO'
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                  : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                              }`}>
+                                {mov.tipo}
+                              </span>
+                            </td>
+                            <td className={`p-3 text-right font-black ${
+                              mov.tipo === 'INGRESO' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                            }`}>
+                              {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
+                            </td>
+                            <td className="p-3 text-right text-zinc-400 dark:text-zinc-500 text-[11px]">
+                              {mov.fecha
+                                ? new Date(mov.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-10 text-center text-zinc-400 text-xs">
+                  No se registraron movimientos en este turno.
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-850/30 flex justify-end shrink-0">
+              <button
+                onClick={() => {
+                  setDetalleCajaModal(null);
+                  setDetalleMovimientos([]);
+                }}
+                className="bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 px-5 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

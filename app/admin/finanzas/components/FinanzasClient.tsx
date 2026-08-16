@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { crearGasto, pagarGasto } from '@/app/actions/gastos';
 import { obtenerReporteContableMensual, ReporteContableMensual } from '@/app/actions/contabilidad';
-import { descargarArchivoCSV, generarCSVConsolidadoGeneral, generarTextoResumenContable } from '@/utils/exportadorContable';
+import { generarTextoResumenContable } from '@/utils/exportadorContable';
+import { exportarExcelConsolidadoGeneral } from '@/utils/exportadorExcel';
 import { Gasto, CategoriaGasto, Caja } from '@/types/gym.types';
 import { useRouter } from 'next/navigation';
 
@@ -84,11 +85,10 @@ export default function FinanzasClient({
     cargarReporteContable(nuevoAño, nuevoMes);
   };
 
-  const handleDescargarExcel = () => {
+  const handleDescargarExcel = async () => {
     if (!exportReporte) return;
-    const csvContent = generarCSVConsolidadoGeneral(exportReporte);
-    const nombreArchivo = `Reporte_Contable_Gym_${exportReporte.periodo.año}_${exportReporte.periodo.mes.toString().padStart(2, '0')}.csv`;
-    descargarArchivoCSV(csvContent, nombreArchivo);
+    const nombreArchivo = `Reporte_Contable_Gym_${exportReporte.periodo.año}_${exportReporte.periodo.mes.toString().padStart(2, '0')}.xlsx`;
+    await exportarExcelConsolidadoGeneral(exportReporte, nombreArchivo);
   };
 
   const handleCopiarWhatsApp = async () => {
@@ -108,9 +108,16 @@ export default function FinanzasClient({
     .filter((m) => m.tipo === 'INGRESO')
     .reduce((sum, m) => sum + m.monto, 0);
 
-  const egresosTotales = movimientosData
+  const egresosCaja = movimientosData
     .filter((m) => m.tipo === 'EGRESO')
     .reduce((sum, m) => sum + m.monto, 0);
+
+  const gastosPagados = gastos
+    .filter((g) => g.estado === 'PAGADO')
+    .reduce((sum, g) => sum + Number(g.monto_final !== null && g.monto_final !== undefined ? g.monto_final : g.monto_estimado), 0);
+
+  // Egresos totales de la empresa (gastos pagados + salidas de caja chica)
+  const egresosTotales = egresosCaja + gastosPagados;
 
   const balanceNeto = ingresosTotales - egresosTotales;
 
@@ -169,6 +176,18 @@ export default function FinanzasClient({
     }
   });
 
+  // Sumar gastos pagados al mes correspondiente
+  gastos.forEach((g) => {
+    if (g.estado === 'PAGADO') {
+      const f = new Date(g.fecha_pago || g.fecha_programada);
+      const key = `${mesesNombres[f.getMonth()]} ${f.getFullYear().toString().substring(2)}`;
+      if (key in monthlyData) {
+        const monto = Number(g.monto_final !== null && g.monto_final !== undefined ? g.monto_final : g.monto_estimado);
+        monthlyData[key].egreso += monto;
+      }
+    }
+  });
+
   const maxMensual = Math.max(
     ...ultimosMeses.map((key) => Math.max(monthlyData[key].ingreso, monthlyData[key].egreso)),
     100 // default min height scale
@@ -193,7 +212,7 @@ export default function FinanzasClient({
   // Confirmar Pago de Gasto
   const handleConfirmarPagoGasto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedGastoParaPagar || !cajaActiva) return;
+    if (!selectedGastoParaPagar) return;
     setLoading(true);
     setFormError(null);
 
@@ -204,7 +223,7 @@ export default function FinanzasClient({
       return;
     }
 
-    const res = await pagarGasto(selectedGastoParaPagar.id_gasto, cajaActiva.id_caja, monto);
+    const res = await pagarGasto(selectedGastoParaPagar.id_gasto, monto);
     setLoading(false);
     if (res.error) {
       setFormError(res.error);
@@ -215,8 +234,27 @@ export default function FinanzasClient({
     }
   };
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div suppressHydrationWarning className="h-28 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+          <div suppressHydrationWarning className="h-28 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+          <div suppressHydrationWarning className="h-28 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        </div>
+        <div suppressHydrationWarning className="h-[400px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-zinc-700/10 blur-3xl"></div>
@@ -260,8 +298,9 @@ export default function FinanzasClient({
         {/* Egresos Históricos */}
         <div className="bg-white rounded-xl p-5 shadow-xs border border-zinc-200/60 dark:bg-zinc-900 dark:border-zinc-850 flex items-center justify-between">
           <div className="space-y-1">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Egresos Totales</span>
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Egresos y Gastos Totales</span>
             <p className="text-xl font-bold text-rose-600 dark:text-rose-455">S/ {egresosTotales.toFixed(2)}</p>
+            <span className="text-[9px] font-bold text-zinc-400 block">S/ {gastosPagados.toFixed(2)} gastos pagados + S/ {egresosCaja.toFixed(2)} caja</span>
           </div>
           <span className="text-lg">💸</span>
         </div>
@@ -269,7 +308,7 @@ export default function FinanzasClient({
         {/* Balance */}
         <div className="bg-white rounded-xl p-5 shadow-xs border border-zinc-200/60 dark:bg-zinc-900 dark:border-zinc-850 flex items-center justify-between">
           <div className="space-y-1">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Balance Caja</span>
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">Balance General Neto</span>
             <p className={`text-xl font-bold ${balanceNeto >= 0 ? 'text-zinc-900 dark:text-white' : 'text-rose-600'}`}>
               S/ {balanceNeto.toFixed(2)}
             </p>
@@ -428,15 +467,14 @@ export default function FinanzasClient({
                       <td className="p-4">
                         {g.estado === 'PENDIENTE' ? (
                           <button
-                            disabled={!cajaActiva}
                             onClick={() => {
                               setSelectedGastoParaPagar(g);
                               setMontoFinalPago(g.monto_estimado.toString());
                             }}
-                            className="bg-zinc-950 hover:bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                            title={cajaActiva ? 'Liquidar gasto en caja del día' : 'Requiere caja abierta'}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
+                            title="Marcar gasto como pagado / cancelado"
                           >
-                            Pagar Ahora
+                            Marcar Pagado
                           </button>
                         ) : (
                           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-semibold">
@@ -561,14 +599,17 @@ export default function FinanzasClient({
       )}
 
       {/* ----------------- MODAL CONFIRMAR PAGO DE GASTO ----------------- */}
-      {selectedGastoParaPagar && cajaActiva && (
+      {selectedGastoParaPagar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/50 backdrop-blur-xs">
           <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-850">
             <div className="px-6 py-5 border-b border-zinc-150 dark:border-zinc-850 bg-zinc-50/50 flex justify-between items-center">
-              <h3 className="font-bold text-base text-zinc-900 dark:text-zinc-50">Liquidar y Pagar Gasto</h3>
+              <div>
+                <h3 className="font-bold text-base text-zinc-900 dark:text-zinc-50">Marcar Gasto como Pagado</h3>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">Control administrativo (no afecta la caja del día)</p>
+              </div>
               <button
                 onClick={() => setSelectedGastoParaPagar(null)}
-                className="text-zinc-400 hover:text-zinc-600 transition-colors p-1"
+                className="text-zinc-400 hover:text-zinc-600 transition-colors p-1 cursor-pointer"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -589,19 +630,19 @@ export default function FinanzasClient({
                 <p className="text-xs text-zinc-500 leading-relaxed">{selectedGastoParaPagar.descripcion || 'Sin descripción adicional.'}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 bg-zinc-50 dark:bg-zinc-850/55 p-3.5 rounded-xl border border-zinc-200/50">
+              <div className="bg-zinc-50 dark:bg-zinc-850/55 p-3.5 rounded-xl border border-zinc-200/50 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-bold text-zinc-400 block uppercase">Estimado Inicial</span>
                   <span className="font-bold text-sm text-zinc-800 dark:text-zinc-200">S/ {selectedGastoParaPagar.monto_estimado.toFixed(2)}</span>
                 </div>
-                <div>
-                  <span className="text-[10px] font-bold text-zinc-400 block uppercase">Caja del Turno</span>
-                  <span className="font-black text-sm text-emerald-600">S/ {cajaActiva.fecha}</span>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-zinc-400 block uppercase">Fecha Programada</span>
+                  <span className="font-semibold text-xs text-zinc-700 dark:text-zinc-300">{selectedGastoParaPagar.fecha_programada}</span>
                 </div>
               </div>
 
               <div className="space-y-2 text-center pt-2">
-                <label className="text-xs font-bold text-zinc-450 uppercase block">¿Monto Final a Pagar (Efectivo egresado)?</label>
+                <label className="text-xs font-bold text-zinc-450 uppercase block">¿Monto Final Liquidado / Pagado?</label>
                 <div className="relative max-w-xs mx-auto">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-450 dark:text-zinc-500 font-extrabold text-lg">S/</span>
                   <input
@@ -627,9 +668,9 @@ export default function FinanzasClient({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-zinc-950 hover:bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 px-5 py-2.5 rounded-xl text-xs font-black cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400 px-5 py-2.5 rounded-xl text-xs font-black cursor-pointer"
                 >
-                  {loading ? 'Procesando...' : 'Confirmar Egreso'}
+                  {loading ? 'Guardando...' : 'Confirmar como Pagado'}
                 </button>
               </div>
             </form>
@@ -874,7 +915,7 @@ export default function FinanzasClient({
                   className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-md shadow-emerald-600/20 cursor-pointer disabled:opacity-40"
                 >
                   <span>📥</span>
-                  <span>Descargar Excel (.csv)</span>
+                  <span>Descargar Excel (.xlsx)</span>
                 </button>
               </div>
             </div>

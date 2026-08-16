@@ -12,7 +12,8 @@ export default async function RecepcionPage() {
   }
 
   // Verificar que tenga el módulo de Recepcion o sea admin
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Recepcion');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Recepcion') || user.permisos?.includes('Recepcion');
   if (!tieneAcceso) {
     redirect('/admin');
   }

@@ -16,8 +16,25 @@ export default function RolesLayout({ roles, permisos, rolesPermisos }: RolesLay
 
   const selectedRol = roles.find(r => r.id_rol === selectedRolId);
 
+  const [mounted, setMounted] = useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div suppressHydrationWarning className="h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+          <div suppressHydrationWarning className="lg:col-span-2 h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-blue-600/10 blur-3xl"></div>

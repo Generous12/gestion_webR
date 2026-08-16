@@ -126,6 +126,16 @@ export interface MovimientoCaja {
   concepto: string;
   monto: number;
   fecha: string;
+  usuarios_sistema?: {
+    id_usuario?: number;
+    usuario?: string;
+    equipo?: {
+      id_miembro?: number;
+      nombre?: string;
+      apellido?: string | null;
+      dni?: string | null;
+    } | null;
+  } | null;
 }
 
 export interface SesionUsuarioActual extends Omit<UsuarioSistema, 'password_hash'> {
@@ -146,5 +156,22 @@ export interface MovimientoInventario {
   usuarios_sistema?: {
     usuario: string;
   } | null;
+}
+
+export interface ContactoWeb {
+  id_contacto: number;
+  nombre: string;
+  dni: string;
+  celular: string;
+  email: string;
+  motivo: string;
+  mensaje: string;
+  estado: 'NUEVO' | 'CONTACTADO' | 'CONVERTIDO' | 'DESCARTADO';
+  notas_admin: string | null;
+  fecha_registro: string;
+  es_socio?: boolean;
+  tiene_membresia_activa?: boolean;
+  estado_socio?: 'CON_MEMBRESIA_ACTIVA' | 'REGISTRADO_SIN_MEMBRESIA' | 'NO_REGISTRADO';
+  plan_actual?: string | null;
 }
 

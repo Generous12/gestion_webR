@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { obtenerVentasReportePorDia, subirComprobanteVenta, ReporteVentaItem } from '@/app/actions/ventas_productos';
-import { descargarArchivoCSV, generarCSVVentasDia } from '@/utils/exportadorContable';
+import { exportarExcelVentasDia } from '@/utils/exportadorExcel';
 import { useModalAlert } from '@/context/ModalAlertContext';
 
 interface HistorialVentasClientProps {
@@ -128,6 +128,11 @@ export default function HistorialVentasClient({
     );
   });
 
+  const [mounted, setMounted] = useState<boolean>(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const totalDiaRecaudado = ventas.reduce((sum, v) => sum + v.total, 0);
   const totalEfectivo = ventas.filter((v) => v.metodoPago.toLowerCase().includes('efectivo')).reduce((sum, v) => sum + v.total, 0);
   const totalYape = ventas.filter((v) => v.metodoPago.toLowerCase().includes('yape')).reduce((sum, v) => sum + v.total, 0);
@@ -135,8 +140,18 @@ export default function HistorialVentasClient({
   const totalOtros = ventas.filter((v) => !['efectivo', 'yape', 'plin'].includes(v.metodoPago.toLowerCase())).reduce((sum, v) => sum + v.total, 0);
   const ventasPendientesFoto = ventas.filter((v) => ['yape', 'plin'].includes(v.metodoPago.toLowerCase()) && !v.comprobanteUrl).length;
 
+  if (!mounted) {
+    return (
+      <div suppressHydrationWarning className="space-y-6 animate-pulse p-2 sm:p-4">
+        <div suppressHydrationWarning className="h-32 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-28 rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+        <div suppressHydrationWarning className="h-[450px] rounded-2xl bg-zinc-200/60 dark:bg-zinc-850" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div suppressHydrationWarning className="space-y-6">
       {/* Header Panel */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-900 p-6 shadow-md border border-zinc-200/10 sm:p-8 dark:border-zinc-800">
         <div className="absolute right-0 top-0 -mr-20 -mt-20 h-80 w-80 rounded-full bg-blue-600/10 blur-3xl"></div>
@@ -203,12 +218,17 @@ export default function HistorialVentasClient({
               🔄
             </button>
             <button
-              onClick={() => {
-                const csv = generarCSVVentasDia(filteredVentas, fecha);
-                descargarArchivoCSV(csv, `Ventas_Gym_${fecha}.csv`);
+              onClick={async () => {
+                try {
+                  await exportarExcelVentasDia(filteredVentas, fecha);
+                  showToast('Reporte del día exportado en Excel (.xlsx) con éxito.', 'success');
+                } catch (err) {
+                  console.error('Error al exportar ventas:', err);
+                  showToast('Error al generar el archivo Excel.', 'danger');
+                }
               }}
               className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
-              title="Descargar detalle del día en Excel / CSV"
+              title="Descargar detalle del día en Excel formateado (.xlsx)"
             >
               <span>📥</span>
               <span>Exportar Día (Excel)</span>

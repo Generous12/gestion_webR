@@ -14,7 +14,7 @@ function esUsuarioAdmin(user: { usuario?: string; roles?: string[] }) {
   );
 }
 
-// Obtener la caja activa (primero la propia del usuario o la caja activa global del gimnasio si es Admin/Caja)
+// Obtener la caja activa (la caja abierta del gimnasio compartida para todos los cajeros, recepcionistas y administradores)
 export async function obtenerCajaActiva() {
   const loggedInUser = await getSesionActual();
   if (!loggedInUser) {
@@ -23,61 +23,36 @@ export async function obtenerCajaActiva() {
 
   const supabase = await createClient();
 
-  // 1. Primero intentar obtener la caja abierta del propio usuario en sesión
-  const { data: miCaja, error: errMiCaja } = await supabase
+  // Obtener la caja activa ABIERTA en el gimnasio
+  const { data: cajaAbierta, error } = await supabase
     .from('cajas')
     .select('*, usuarios_sistema(id_usuario, usuario, equipo(id_miembro, nombre, apellido, dni, email))')
-    .eq('id_usuario', loggedInUser.id_usuario)
     .eq('estado', 'ABIERTA')
+    .order('fecha_apertura', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  if (miCaja && !errMiCaja) {
-    return miCaja as Caja;
-  }
-
-  // 2. Si el usuario actual no tiene caja propia pero es Admin / Super Admin,
-  // puede obtener la caja activa abierta por cualquier colaborador para auditarla o cerrarla.
-  const tienePermisoAdmin = esUsuarioAdmin(loggedInUser);
-
-  if (tienePermisoAdmin) {
-    const { data: cajaGlobal, error: errGlobal } = await supabase
-      .from('cajas')
-      .select('*, usuarios_sistema(id_usuario, usuario, equipo(id_miembro, nombre, apellido, dni, email))')
-      .eq('estado', 'ABIERTA')
-      .order('fecha_apertura', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (cajaGlobal && !errGlobal) {
-      return cajaGlobal as Caja;
-    }
+  if (cajaAbierta && !error) {
+    return cajaAbierta as Caja;
   }
 
   return null;
 }
 
-// Obtener todas las cajas abiertas activas en el sistema (Solo Administrador o la propia del usuario)
+// Obtener todas las cajas abiertas activas en el sistema
 export async function obtenerCajasAbiertas() {
   const loggedInUser = await getSesionActual();
   if (!loggedInUser) {
     return [];
   }
 
-  const esAdmin = esUsuarioAdmin(loggedInUser);
   const supabase = await createClient();
 
-  let query = supabase
+  const { data, error } = await supabase
     .from('cajas')
     .select('*, usuarios_sistema(id_usuario, usuario, equipo(id_miembro, nombre, apellido, dni, email))')
     .eq('estado', 'ABIERTA')
     .order('fecha_apertura', { ascending: false });
-
-  // Si no es Administrador, solo puede consultar su propia caja abierta
-  if (!esAdmin) {
-    query = query.eq('id_usuario', loggedInUser.id_usuario);
-  }
-
-  const { data, error } = await query;
 
   if (error) {
     console.error('Error al obtener cajas abiertas:', error);
@@ -298,13 +273,14 @@ export async function cerrarCaja(idCaja: number, montoFinal: number) {
     return { error: 'La caja ya se encuentra CERRADA.' };
   }
 
-  // REGLA: Solo el Administrador o el propio colaborador que abrió la caja pueden cerrarla
+  // Permiso: Administradores, el propio responsable o cualquier colaborador asignado al módulo de Caja
   const esAdmin = esUsuarioAdmin(loggedInUser);
   const esPropioResponsable = caja.id_usuario === loggedInUser.id_usuario;
+  const tieneAccesoCaja = loggedInUser.modulos?.includes('Caja') || loggedInUser.roles?.includes('Cajero') || loggedInUser.roles?.includes('Recepcionista');
 
-  if (!esAdmin && !esPropioResponsable) {
+  if (!esAdmin && !esPropioResponsable && !tieneAccesoCaja) {
     return {
-      error: 'No tienes permisos para cerrar una caja que no abriste. Solo el Administrador o el propio colaborador que abrió la caja pueden cerrarla.'
+      error: 'No tienes permisos para cerrar la caja.'
     };
   }
 
@@ -351,7 +327,7 @@ export async function obtenerMovimientosCaja(idCaja: number) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('movimientos_caja')
-    .select('*')
+    .select('*, usuarios_sistema(id_usuario, usuario, equipo(id_miembro, nombre, apellido, dni))')
     .eq('id_caja', idCaja)
     .order('fecha', { ascending: false });
 
@@ -360,7 +336,7 @@ export async function obtenerMovimientosCaja(idCaja: number) {
     return [];
   }
 
-  return data as MovimientoCaja[];
+  return (data || []) as unknown as MovimientoCaja[];
 }
 
 // Registrar movimiento manual (ingreso/egreso administrativo extra)

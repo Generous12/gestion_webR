@@ -120,8 +120,8 @@ export async function crearGasto(formData: FormData) {
   return { success: true };
 }
 
-// Pagar un gasto programado y registrar egreso en caja activa
-export async function pagarGasto(idGasto: number, idCaja: number, montoFinal: number) {
+// Marcar un gasto programado como pagado / cancelado (control administrativo, NO afecta la caja chica diaria)
+export async function pagarGasto(idGasto: number, montoFinal: number, _idCaja?: number) {
   const loggedInUser = await getSesionActual();
   if (!loggedInUser) {
     return { error: 'No autorizado. Por favor inicie sesión.' };
@@ -148,20 +148,9 @@ export async function pagarGasto(idGasto: number, idCaja: number, montoFinal: nu
     return { error: 'Este gasto ya se encuentra PAGADO.' };
   }
 
-  // 2. Verificar que la caja del turno esté abierta
-  const { data: caja, error: errCaja } = await supabase
-    .from('cajas')
-    .select('*')
-    .eq('id_caja', idCaja)
-    .single();
-
-  if (errCaja || !caja || caja.estado !== 'ABIERTA') {
-    return { error: 'La caja seleccionada no está abierta o no existe.' };
-  }
-
   const fechaHoy = new Date().toISOString().split('T')[0];
 
-  // 3. Actualizar gasto a estado PAGADO
+  // 2. Actualizar gasto a estado PAGADO
   const { error: errUpdate } = await supabase
     .from('gastos')
     .update({
@@ -177,30 +166,16 @@ export async function pagarGasto(idGasto: number, idCaja: number, montoFinal: nu
     return { error: `No se pudo registrar el pago del gasto: ${errUpdate.message}` };
   }
 
-  // 4. Insertar egreso en movimientos_caja
-  const { error: errMov } = await supabase
-    .from('movimientos_caja')
-    .insert({
-      id_caja: idCaja,
-      id_usuario: loggedInUser.id_usuario,
-      id_gasto: idGasto,
-      tipo: 'EGRESO',
-      concepto: `Pago Gasto: ${gasto.concepto}`,
-      monto: montoFinal
-    });
-
-  if (errMov) {
-    console.error('Error al registrar egreso en caja:', errMov);
-  }
-
-  // 5. Registrar log de seguridad
+  // 3. Registrar log de seguridad
   await supabase.from('logs_seguridad').insert({
     id_usuario: loggedInUser.id_usuario,
     accion: 'PAGO_GASTO',
-    detalle: `Gasto liquidado: ${gasto.concepto}. Monto: S/ ${montoFinal.toFixed(2)}`
+    detalle: `Gasto marcado como pagado/cancelado: ${gasto.concepto}. Monto: S/ ${montoFinal.toFixed(2)} por ${loggedInUser.usuario}`
   });
 
   revalidatePath('/admin/finanzas');
   revalidatePath('/admin/caja');
+  revalidatePath('/admin');
   return { success: true };
 }
+

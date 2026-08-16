@@ -10,9 +10,11 @@ export async function guardarPermisosRol(idRol: number, permisosIds: number[]) {
     return { error: 'No autorizado. Por favor inicie sesión.' };
   }
 
-  // Verificar que tenga el permiso RolesPermisos
+  // Verificar que tenga el permiso RolesPermisos o sea Administrador
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tienePermiso = (loggedInUser as any).permisos?.includes('RolesPermisos') || loggedInUser.usuario === 'admin';
+  const esAdmin = loggedInUser.usuario === 'admin' || (loggedInUser as any).roles?.includes('Super Admin') || (loggedInUser as any).roles?.includes('Administrador') || (loggedInUser as any).roles?.includes('Admin');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tienePermiso = esAdmin || (loggedInUser as any).permisos?.includes('RolesPermisos') || (loggedInUser as any).permisos?.includes('Roles') || (loggedInUser as any).modulos?.includes('RolesPermisos') || (loggedInUser as any).modulos?.includes('Roles');
   if (!tienePermiso) {
     return { error: 'No tienes permisos para asignar permisos a los roles.' };
   }

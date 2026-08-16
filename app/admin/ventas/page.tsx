@@ -18,7 +18,8 @@ export default async function VentasPage({ searchParams }: PageProps) {
   }
 
   // Verificar acceso a Ventas: Admin o personal con módulo de Ventas
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Ventas');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Ventas') || user.permisos?.includes('Ventas');
   if (!tieneAcceso) {
     redirect('/admin');
   }

@@ -13,7 +13,8 @@ export default async function FinanzasPage() {
   }
 
   // Verificar acceso a Finanzas (solo Admin o usuarios con permiso Finanzas)
-  const tieneAcceso = user.usuario === 'admin' || user.modulos?.includes('Finanzas');
+  const esAdmin = user.usuario === 'admin' || user.roles?.includes('Super Admin') || user.roles?.includes('Administrador') || user.roles?.includes('Admin');
+  const tieneAcceso = esAdmin || user.modulos?.includes('Finanzas') || user.permisos?.includes('Finanzas');
   if (!tieneAcceso) {
     redirect('/admin');
   }
